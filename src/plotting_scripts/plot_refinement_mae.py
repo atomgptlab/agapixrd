@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 # ───────────────────────── config / labels ─────────────────────────
 REFINEMENT_DIRS = {
     "no_refinement": "No refinement",
+    "no_refinement_alignnff": "No refinement + ALIGNN-FF",
     "bmgn": "BMGN",
     "bmgn_alignnff": "BMGN + ALIGNN-FF",
     "gsas2": "GSAS-II",
