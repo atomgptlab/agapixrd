@@ -1,1 +1,32 @@
-hi
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  jarvis:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          activate-environment: jarvis
+          python-version: "3.10"
+          auto-activate-base: false
+
+      - name: Install jarvis-tools
+        shell: bash -l {0}
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install jarvis-tools
+
+      - name: Check jarvis environment
+        shell: bash -l {0}
+        run: |
+          conda info
+          python -c "from jarvis.core.atoms import Atoms; print('jarvis ok')"
