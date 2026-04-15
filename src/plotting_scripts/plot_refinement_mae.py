@@ -58,26 +58,27 @@ def find_runs_root(start: Path) -> Path:
     )
 
 
-def newest_results_csv(run_dir: Path) -> Path:
+def newest_results_csv(run_dir: Path) -> Path | None:
     """
     Prefer the newest timestamped rruff_results_*/results.csv.
     Fall back to *_results.csv if needed.
+    Return None if nothing is found.
     """
     timestamped = sorted(
         run_dir.glob("rruff_results_*/results.csv"),
-        key=lambda p: p.parent.name
+        key=lambda p: p.stat().st_mtime
     )
     if timestamped:
         return timestamped[-1]
 
     fallback = sorted(
         run_dir.glob("*_results.csv"),
-        key=lambda p: p.name
+        key=lambda p: p.stat().st_mtime
     )
     if fallback:
         return fallback[-1]
 
-    raise FileNotFoundError(f"No results CSV found in {run_dir}")
+    return None
 
 
 def compute_mae(df: pd.DataFrame, param: str):
@@ -98,16 +99,37 @@ def compute_mae(df: pd.DataFrame, param: str):
 
 def build_summary(runs_root: Path) -> pd.DataFrame:
     rows = []
+
+    print("\nDEBUG: Looking for refinement directories:", file=sys.stderr)
     for run_key, pretty_name in REFINEMENT_DIRS.items():
         run_dir = runs_root / run_key
+        print(f"  - {run_key}: {run_dir}", file=sys.stderr)
+
         if not run_dir.is_dir():
-            print(f"WARNING: Missing directory {run_dir} — skipped", file=sys.stderr)
+            print(
+                f"WARNING: Missing directory {run_dir} — skipped",
+                file=sys.stderr
+            )
             continue
 
         csv_path = newest_results_csv(run_dir)
+        if csv_path is None:
+            print(
+                f"WARNING: No results CSV found in {run_dir} — skipped",
+                file=sys.stderr
+            )
+            continue
+
         print(f"DEBUG: {pretty_name} -> {csv_path}", file=sys.stderr)
 
-        df = pd.read_csv(csv_path)
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            print(
+                f"WARNING: Failed to read {csv_path} ({e}) — skipped",
+                file=sys.stderr
+            )
+            continue
 
         rec = {
             "refinement_key": run_key,
@@ -163,6 +185,10 @@ def plot_mae_figure(
     title: str,
     figsize=(13, 8),
 ):
+    if summary.empty:
+        print(f"WARNING: Empty summary for plot {output_path.name} — skipped", file=sys.stderr)
+        return
+
     mae_df = summary_to_mae_df(summary)
 
     labels = list(mae_df.index)
@@ -241,6 +267,7 @@ def plot_mae_figure(
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    print(f"DEBUG: Saved plot -> {output_path}", file=sys.stderr)
 
 
 # ───────────────────────── main workflow ───────────────────────────
@@ -254,26 +281,33 @@ summary_path = RUNS / "refinement_mae_summary.csv"
 summary.to_csv(summary_path, index=False)
 print(f"DEBUG: Wrote summary -> {summary_path}", file=sys.stderr)
 
-# Full comparison figure
-plot_all_path = RUNS / "refinement_mae_all6.png"
+# Full comparison figure: uses every method successfully found
+plot_all_path = RUNS / "refinement_mae_all_methods.png"
 plot_mae_figure(
     summary=summary,
     output_path=plot_all_path,
     title="Mean Absolute Error by Refinement Method",
-    figsize=(13, 8),
+    figsize=(14, 8),
 )
 
-# No refinement vs BMGN vs BMGN+ALIGNN-FF figure
+# Second figure: no refinement, no refinement + ALIGNN-FF, BMGN, BMGN + ALIGNN-FF
+comparison_keys = [
+    "no_refinement",
+    "no_refinement_alignnff",
+    "bmgn",
+    "bmgn_alignnff",
+]
+
 comparison_subset = summary[
-    summary["refinement_key"].isin(["no_refinement", "bmgn", "bmgn_alignnff"])
+    summary["refinement_key"].isin(comparison_keys)
 ].copy()
 
-plot_bmgn_path = RUNS / "refinement_mae_no_refinement_vs_bmgn_vs_bmgn_alignnff.png"
+plot_subset_path = RUNS / "refinement_mae_no_refinement_and_bmgn_alignnff_comparison.png"
 plot_mae_figure(
     summary=comparison_subset,
-    output_path=plot_bmgn_path,
-    title="No Refinement vs. BMGN vs. BMGN + ALIGNN-FF\nMean Absolute Error",
-    figsize=(11, 7),
+    output_path=plot_subset_path,
+    title="No Refinement vs. No Refinement + ALIGNN-FF vs. BMGN vs. BMGN + ALIGNN-FF\nMean Absolute Error",
+    figsize=(13, 8),
 )
 
 # ───────────────────────── console summary ─────────────────────────
@@ -287,6 +321,6 @@ display_cols = (
 print("\nMAE summary:")
 print(summary[display_cols].to_string(index=False))
 print(f"\nSaved full plot:        {plot_all_path}")
-print(f"Saved comparison plot:  {plot_bmgn_path}")
+print(f"Saved subset plot:      {plot_subset_path}")
 print(f"Saved summary:          {summary_path}")
 print("DEBUG: All done.", file=sys.stderr)
