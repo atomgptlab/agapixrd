@@ -31,8 +31,6 @@ python -m pip install --upgrade pip
 python -m pip install jarvis-tools
 ```
 
-Depending on your local environment and cluster configuration, you may also need additional Python packages used by the analysis and plotting scripts. However, `jarvis-tools` is the essential starting point and should be installed first.
-
 ## API Key Setup
 
 Create a `key.txt` file in the repository root containing your AtomGPT.org API key. The workflow reads this file at runtime to authenticate API requests.
