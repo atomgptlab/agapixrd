@@ -41,32 +41,6 @@ Create a `key.txt` file in the repository root containing your AtomGPT.org API k
 echo "YOUR_ATOMGPT_API_KEY" > key.txt
 ```
 
-The repository root should then contain a file layout similar to:
-
-```bash
-analyse_filtered_rruff.py
-analyse_filtered_rruff_runner.sh
-compile_agapi_replication_metrics.py
-compile_results.sh
-generate_figures.sh
-key.txt
-plot_match_rate_crystal_systems.py
-plot_match_rate.py
-plot_refinement_jsd_18panel.py
-plot_refinement_mae.py
-plot_refinement_mae_bmgn_vs_bmgn_alignnff.py
-README.md
-replication_summary.json
-rruff_stoich_pie.py
-rruff_xrd_analysis.py
-runs/
-runs_to_compile.txt
-stoich.sh
-xrd_pipeline_none.job
-xrd_pipeline_gsas2.job
-xrd_pipeline_bmgn.job
-xrd_pipeline_bmgn_alignnff.job
-```
 
 ## Reproducing the Benchmark
 
