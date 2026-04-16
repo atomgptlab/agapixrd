@@ -2,7 +2,9 @@ import argparse
 import json
 import math
 import sys
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -186,6 +188,9 @@ def run_dataset_mode(args):
     output_dir.mkdir(parents=True, exist_ok=True)
     errors_path = output_dir / "errors.jsonl"
 
+    job_start_epoch = time.time()
+    print(f"  Computation start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+
     print(f"Downloading dataset '{args.dataset}' ...", flush=True)
     entries = figshare_data(args.dataset)
     print(f"  {len(entries)} entries loaded.", flush=True)
@@ -195,8 +200,12 @@ def run_dataset_mode(args):
         processed_jids = _get_processed_jids(output_dir)
         print(f"  Resume: {len(processed_jids)} already processed.", flush=True)
 
+    already_done = len(processed_jids)
+    grand_total = len(entries)
     to_process = [e for e in entries if e.get("jid", "") not in processed_jids]
     print(f"  {len(to_process)} entries to simulate.", flush=True)
+
+    session_start_epoch = time.time()
 
     if not to_process:
         print("Nothing to do.", flush=True)
@@ -219,7 +228,8 @@ def run_dataset_mode(args):
 
     records: list = []
     shard_idx = existing_shards
-    grand_total = existing_shards + total_shards
+    grand_total_shards = existing_shards + total_shards
+    n_session_done = 0
 
     with open(errors_path, "a") as err_f:
         with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
@@ -235,6 +245,7 @@ def run_dataset_mode(args):
             for future in tqdm(as_completed(futures), total=len(futures),
                                desc="Simulating XRD"):
                 result = future.result()
+                n_session_done += 1
                 if result is None or result.get("__error__"):
                     err_f.write(json.dumps({
                         "jid": result["jid"] if result else futures[future],
@@ -246,16 +257,36 @@ def run_dataset_mode(args):
                 records.append(result)
 
                 if len(records) >= args.shard_size:
-                    shard_path = output_dir / f"train-{shard_idx:05d}-of-{grand_total:05d}.parquet"
+                    shard_path = output_dir / f"train-{shard_idx:05d}-of-{grand_total_shards:05d}.parquet"
                     _write_shard(records[:args.shard_size], shard_path)
-                    print(f"  Wrote {shard_path.name}", flush=True)
+                    n_done_total = already_done + n_session_done
+                    elapsed = time.time() - job_start_epoch
+                    rate = n_session_done / max(time.time() - session_start_epoch, 1e-6)
+                    remaining = grand_total - n_done_total
+                    eta_s = remaining / rate if rate > 0 else float("inf")
+                    eta_str = str(timedelta(seconds=int(eta_s))) if eta_s != float("inf") else "unknown"
+                    print(
+                        f"  [{datetime.now().strftime('%H:%M:%S')}] Wrote {shard_path.name} | "
+                        f"{n_done_total}/{grand_total} ({100*n_done_total/grand_total:.1f}%) | "
+                        f"rate {rate:.1f} struct/s | elapsed {timedelta(seconds=int(elapsed))} | "
+                        f"ETA {eta_str}",
+                        flush=True,
+                    )
                     records = records[args.shard_size:]
                     shard_idx += 1
 
         if records:
-            shard_path = output_dir / f"train-{shard_idx:05d}-of-{grand_total:05d}.parquet"
+            shard_path = output_dir / f"train-{shard_idx:05d}-of-{grand_total_shards:05d}.parquet"
             _write_shard(records, shard_path)
             print(f"  Wrote {shard_path.name}", flush=True)
+
+    total_elapsed = time.time() - job_start_epoch
+    print(
+        f"\n  Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"Total elapsed: {timedelta(seconds=int(total_elapsed))} | "
+        f"{already_done + n_session_done}/{grand_total} structures processed",
+        flush=True,
+    )
 
     _write_metadata(output_dir, args, grid)
     print(f"\nDone. Output in {output_dir}/", flush=True)

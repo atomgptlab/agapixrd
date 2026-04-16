@@ -26,6 +26,9 @@ echo "Job CPUs/node map:  ${SLURM_JOB_CPUS_PER_NODE}"
 echo "===== END JOB METADATA ========="
 echo ""
 echo "===== START COMPUTATION ========"
+_JOB_START_EPOCH=$(date +%s)
+echo "Wall-clock start: $(date '+%Y-%m-%d %H:%M:%S')"
+echo ""
 
 DATASET="alex_pbe_hull"
 OUTPUT_DIR="xrd_datasets/${DATASET}"
@@ -40,4 +43,10 @@ srun --unbuffered python src/agapi_xrd_scripts/xrd_simulate_alex_pbe_hull.py \
     --shard-size 1000 \
     --resume
 
+_JOB_END_EPOCH=$(date +%s)
+_JOB_ELAPSED=$(( _JOB_END_EPOCH - _JOB_START_EPOCH ))
+echo ""
+echo "Wall-clock end:   $(date '+%Y-%m-%d %H:%M:%S')"
+printf "Total elapsed:    %02d:%02d:%02d\n" \
+    $(( _JOB_ELAPSED/3600 )) $(( (_JOB_ELAPSED%3600)/60 )) $(( _JOB_ELAPSED%60 ))
 echo "===== JOB FINISHED ============="
