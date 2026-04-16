@@ -33,5 +33,5 @@ if [[ ! -f key.txt ]]; then
 fi
 API_KEY="$(tr -d '\r\n' < key.txt)"
 
-srun --unbuffered mkdir -p runs/no_refinement && cd runs/no_refinement && python ../../rruff_xrd_analysis.py --api-key "$API_KEY" --output-csv no_refinement_results.csv --output-poscars no_refinement_poscars.json
+srun --unbuffered mkdir -p runs/no_refinement && cd runs/no_refinement && python ../../src/agapi_xrd_scripts/rruff_xrd_analysis.py --api-key "$API_KEY" --output-csv no_refinement_results.csv --output-poscars no_refinement_poscars.json
 echo "===== JOB FINISHED ============="
