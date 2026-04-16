@@ -1,175 +1,200 @@
-# AGAPI-XRD: Reproducibility Repository for Automated X-ray Diffraction Analysis
+# AGAPI-XRD: Reproducibility Repository
 
-This repository contains the benchmark, analysis, and figure-generation scripts used for the AGAPI-XRD study, a hybrid framework for automated crystal-structure identification from powder X-ray diffraction (XRD) data. The workflow combines database-driven pattern matching against JARVIS-DFT and COD, DiffractGPT-based generative structure prediction, optional ALIGNN-FF relaxation, and automated Rietveld refinement. This repository is intended to support reproducibility of the computational experiments and figures reported in the accompanying manuscript.
+Reproducibility code, benchmark scripts, and figure-generation pipelines for the AGAPI-XRD study — a hybrid framework for automated crystal-structure identification from powder X-ray diffraction (XRD) data.
+
+---
 
 ## Abstract
 
-X-ray diffraction (XRD) remains one of the most powerful experimental techniques for characterizing materials, yet the path from raw diffraction data to a refined atomic structure continues to demand significant domain expertise and manual intervention. We present AGAPI-XRD, a hybrid computational framework that integrates DiffractGPT, a generative pretrained transformer trained on thousands of crystal structures and their simulated XRD patterns, elemental and stoichiometric pattern matching with the JARVIS-DFT and COD materials databases, and classical Rietveld refinement into a unified, accessible API hosted on the AtomGPT.org API (AGAPI) platform. DiffractGPT can rapidly predict candidate atomic structures from experimental XRD patterns. These AI-generated structures then serve as high-quality starting configurations for automated Rietveld refinement, dramatically reducing sensitivity to initial guess quality and accelerating convergence.
+X-ray diffraction (XRD) remains one of the most powerful experimental techniques for characterizing materials, yet the path from raw diffraction data to a refined atomic structure continues to demand significant domain expertise and manual intervention. We present AGAPI-XRD, a hybrid computational framework that integrates DiffractGPT (a generative pretrained transformer trained on thousands of crystal structures and their simulated XRD patterns), elemental and stoichiometric pattern matching against the JARVIS-DFT and COD materials databases, optional ALIGNN-FF geometry relaxation, and classical Rietveld refinement into a unified, accessible API hosted on the AtomGPT.org API (AGAPI) platform.
 
-The combined pipeline is exposed through the AGAPI interface at `https://atomgpt.org/xrd`, enabling seamless programmatic access for experimentalists, high-throughput screening workflows, and integration with broader agentic AI frameworks for materials discovery. We benchmark the approach on 276 minerals from the RRUFF powder XRD database, achieving 96.7% structure-identification coverage with lattice-parameter mean absolute errors of approximately 1.1 Å for unit-cell lengths and positive skill scores across lattice dimensions and volume. Pattern matching against JARVIS-DFT and COD provides the highest structural accuracy, while DiffractGPT extends coverage to complex minerals absent from existing databases. By bridging generative AI with established crystallographic refinement, AGAPI-XRD lowers the barrier to automated structure determination and advances the vision of fully autonomous materials-characterization pipelines.
+The combined pipeline is exposed through the AGAPI interface at `https://atomgpt.org/xrd`, enabling seamless programmatic access for experimentalists, high-throughput screening workflows, and integration with broader agentic AI frameworks for materials discovery. We benchmark the approach on 276 minerals from the RRUFF powder XRD database, achieving 96.7% structure-identification coverage with lattice-parameter mean absolute errors of approximately 1.1 Å for unit-cell lengths and positive skill scores across lattice dimensions and volume.
 
-## Repository Scope
+---
 
-This repository contains scripts for:
+## Repository Structure
 
-- running AGAPI-XRD benchmark jobs on the RRUFF dataset,
-- analyzing returned predictions against experimental lattice parameters,
-- compiling replication metrics,
-- generating manuscript figures, and
-- summarizing the results of different refinement settings.
+```
+agapi_xrd_paper/
+├── src/
+│   ├── agapi_xrd_scripts/        # Benchmark drivers and result compilation
+│   │   ├── rruff_xrd_analysis.py
+│   │   ├── analyse_filtered_rruff.py  (symlink → plotting_scripts/)
+│   │   ├── compile_agapi_replication_metrics.py
+│   │   ├── compile_results.sh
+│   │   └── xrd_simulate_alex_pbe_hull.py
+│   ├── slurm_scripts/            # HPC job submission files
+│   │   ├── xrd_pipeline_none.job
+│   │   ├── xrd_pipeline_none_alignnff.job
+│   │   ├── xrd_pipeline_gsas2.job
+│   │   ├── xrd_pipeline_bmgn.job
+│   │   ├── xrd_pipeline_bmgn_alignnff.job
+│   │   └── xrd_simulate_dataset.job
+│   ├── plotting_scripts/         # Figure generation
+│   │   ├── analyse_filtered_rruff.py
+│   │   ├── analyse_filtered_rruff_runner.sh
+│   │   ├── plot_refinement_mae.py
+│   │   ├── plot_refinement_jsd_18panel.py
+│   │   ├── plot_refinement_mae_bmgn_vs_bmgn_alignnff.py
+│   │   ├── plot_match_rate_crystal_systems.py
+│   │   ├── plot_match_rate.py
+│   │   ├── rruff_stoich_pie.py
+│   │   └── stoich.sh
+│   └── generate_figures.sh       # Top-level figure orchestration script
+├── runs/                         # Output directory (populated after benchmark runs)
+│   ├── no_refinement/
+│   ├── no_refinement_alignnff/
+│   ├── gsas2/
+│   ├── bmgn/
+│   └── bmgn_alignnff/
+├── testing/                      # Unit and integration test assets
+├── key.txt                       # AtomGPT.org API key (user-provided, not tracked)
+└── README.md
+```
 
-The benchmark and manuscript focus on a filtered RRUFF subset with `a`, `b`, `c <= 10 Å`, enabling consistent lattice-parameter comparison across the tested structures.
+---
 
 ## Installation
 
-This project is part of the JARVIS ecosystem. A minimal conda environment can be created as follows:
+This project is part of the JARVIS ecosystem. Create and activate a minimal conda environment:
 
 ```bash
 conda create -n jarvis python=3.10 -y
 conda activate jarvis
-python -m pip install --upgrade pip
-python -m pip install jarvis-tools
+pip install --upgrade pip
+pip install jarvis-tools
 ```
 
-## API Key Setup
+### API Key
 
-Create a `key.txt` file in the repository root containing your AtomGPT.org API key. The workflow reads this file at runtime to authenticate API requests.
+Obtain an API key from [atomgpt.org](https://atomgpt.org) and write it to a `key.txt` file at the repository root. The benchmark scripts read this file at runtime.
 
 ```bash
 echo "YOUR_ATOMGPT_API_KEY" > key.txt
 ```
 
+---
 
 ## Reproducing the Benchmark
 
-The main benchmark runs are launched through Slurm job files. From the repository root, submit the desired jobs with:
+Benchmark runs are submitted as Slurm jobs from `src/slurm_scripts/`. The five pipeline variants correspond to different refinement backends and optional ALIGNN-FF pre-relaxation:
+
+| Job file | Refinement backend | ALIGNN-FF pre-relaxation |
+|---|---|---|
+| `xrd_pipeline_none.job` | None | No |
+| `xrd_pipeline_none_alignnff.job` | None | Yes |
+| `xrd_pipeline_gsas2.job` | GSAS-II | No |
+| `xrd_pipeline_bmgn.job` | BGMN | No |
+| `xrd_pipeline_bmgn_alignnff.job` | BGMN | Yes |
+
+Submit any or all jobs from the repository root:
 
 ```bash
-sbatch xrd_pipeline_none.job
-sbatch xrd_pipeline_gsas2.job
-sbatch xrd_pipeline_bmgn.job
-sbatch xrd_pipeline_bmgn_alignnff.job
+sbatch src/slurm_scripts/xrd_pipeline_none.job
+sbatch src/slurm_scripts/xrd_pipeline_none_alignnff.job
+sbatch src/slurm_scripts/xrd_pipeline_gsas2.job
+sbatch src/slurm_scripts/xrd_pipeline_bmgn.job
+sbatch src/slurm_scripts/xrd_pipeline_bmgn_alignnff.job
 ```
 
-These correspond to:
+Job outputs are written to the corresponding subdirectory under `runs/`.
 
-- `xrd_pipeline_none.job`: AGAPI-XRD predictions without Rietveld refinement
-- `xrd_pipeline_gsas2.job`: AGAPI-XRD predictions with GSAS-II refinement
-- `xrd_pipeline_bmgn.job`: AGAPI-XRD predictions with BGMN-based refinement
-- `xrd_pipeline_bmgn_alignnff.job`: AGAPI-XRD predictions with ALIGNN-FF relaxation followed by BGMN-based refinement
+---
 
-After job completion, outputs are organized under the `runs/` directory.
+## Analysis and Figure Generation
 
-## Re-running the Analysis
+After the Slurm jobs complete, run the following steps in order.
 
-Once the Slurm jobs finish, rerun the analysis and figure-generation workflow using the helper scripts included in the repository.
-
-### 1. Analyze returned predictions
+### 1. Analyze benchmark predictions
 
 ```bash
-bash analyse_filtered_rruff_runner.sh
+bash src/plotting_scripts/analyse_filtered_rruff_runner.sh
 ```
 
-This step processes the run directories and computes benchmark statistics against the filtered RRUFF ground truth.
+Processes each `runs/` subdirectory and computes benchmark statistics against the filtered RRUFF ground-truth lattice parameters (`a, b, c ≤ 10 Å`).
 
 ### 2. Generate manuscript figures
 
 ```bash
-bash generate_figures.sh
+bash src/generate_figures.sh
 ```
 
-This script regenerates the figure assets from the processed run outputs.
+Regenerates all figure assets from the processed run outputs.
 
-### 3. Compile replication outputs
+### 3. Aggregate run-level results
 
 ```bash
-bash compile_results.sh
+bash src/agapi_xrd_scripts/compile_results.sh
 ```
 
-This aggregates run-level outputs into a consolidated summary.
+Consolidates outputs from all run directories into a unified summary.
 
-### 4. Build the replication summary
+### 4. Compile replication metrics
 
 ```bash
-python compile_agapi_replication_metrics.py
+python src/agapi_xrd_scripts/compile_agapi_replication_metrics.py
 ```
 
-This produces a consolidated metrics summary, typically written to `replication_summary.json`.
+Produces `replication_summary.json`, a structured metrics file suitable for reviewer inspection.
 
-## Expected Outputs
+---
 
-Depending on which jobs and analysis scripts are run, the repository produces:
-
-- processed benchmark outputs under `runs/`,
-- figure files for lattice-parameter MAE and JSD comparisons,
-- crystal-system and pattern-matching visualizations,
-- stoichiometric composition plots,
-- compiled result summaries, and
-- a replication summary JSON for reviewer-facing inspection.
-
-## Script Overview
+## Script Reference
 
 ### Benchmark and analysis
 
-- `rruff_xrd_analysis.py`  
-  Main benchmark driver for querying AGAPI-XRD predictions and storing outputs locally.
-
-- `analyse_filtered_rruff.py`  
-  Analyzes prediction outputs against filtered RRUFF ground-truth lattice parameters.
-
-- `analyse_filtered_rruff_runner.sh`  
-  Convenience shell wrapper for running the filtered RRUFF analysis workflow.
-
-- `compile_agapi_replication_metrics.py`  
-  Compiles benchmark outputs into a reviewer-friendly replication summary JSON.
-
-- `compile_results.sh`  
-  Aggregates results from multiple run directories into a consolidated summary.
+| Script | Description |
+|---|---|
+| `agapi_xrd_scripts/rruff_xrd_analysis.py` | Primary benchmark driver; queries AGAPI-XRD predictions and writes outputs to `runs/` |
+| `plotting_scripts/analyse_filtered_rruff.py` | Evaluates prediction outputs against filtered RRUFF ground-truth lattice parameters |
+| `plotting_scripts/analyse_filtered_rruff_runner.sh` | Shell wrapper for the filtered RRUFF analysis workflow |
+| `agapi_xrd_scripts/compile_agapi_replication_metrics.py` | Compiles benchmark outputs into `replication_summary.json` |
+| `agapi_xrd_scripts/compile_results.sh` | Aggregates results from multiple run directories |
+| `agapi_xrd_scripts/xrd_simulate_alex_pbe_hull.py` | Standalone dense XRD simulator for dataset generation |
 
 ### Figure generation
 
-- `plot_refinement_mae.py`  
-  Generates a single MAE comparison figure across the six lattice parameters for the main refinement settings.
+| Script | Description |
+|---|---|
+| `plotting_scripts/plot_refinement_mae.py` | MAE comparison across six lattice parameters for all refinement settings |
+| `plotting_scripts/plot_refinement_jsd_18panel.py` | 18-panel Jensen–Shannon divergence figure across lattice parameters and refinement settings |
+| `plotting_scripts/plot_match_rate_crystal_systems.py` | Crystal-system histograms and pattern-matching summaries |
+| `plotting_scripts/plot_refinement_mae_bmgn_vs_bmgn_alignnff.py` | Lattice-parameter MAE comparison between BGMN and BGMN + ALIGNN-FF workflows |
+| `plotting_scripts/plot_match_rate.py` | Pattern-matching rate summaries |
+| `plotting_scripts/rruff_stoich_pie.py` | Elemental and stoichiometric composition visualizations for the RRUFF benchmark set |
+| `plotting_scripts/stoich.sh` | Shell helper for the stoichiometry figure workflow |
 
-- `plot_refinement_jsd_18panel.py`  
-  Produces a multi-panel Jensen-Shannon divergence figure across lattice parameters and refinement settings.
+---
 
-- `plot_match_rate_crystal_systems.py`  
-  Generates crystal-system histograms, pattern-matching summaries, and combined presentation figures.
+## Expected Outputs
 
-- `plot_refinement_mae_bmgn_vs_bmgn_alignnff.py`  
-  Compares lattice-parameter MAE between BMGN and BMGN + ALIGNN-FF workflows.
+A complete run produces the following artifacts under `runs/` and the repository root:
 
-- `plot_match_rate.py`  
-  Generates pattern-matching rate summaries.
+- Per-condition benchmark outputs in `runs/{condition}/`
+- Lattice-parameter MAE comparison figures (PNG)
+- 18-panel Jensen–Shannon divergence figure (PNG)
+- Crystal-system and pattern-matching histograms (PNG)
+- Stoichiometric composition plots (PNG)
+- `replication_summary.json` — structured replication metrics for all conditions
 
-### Composition / stoichiometry utilities
+---
 
-- `rruff_stoich_pie.py`  
-  Produces stoichiometric or elemental composition visualizations for the RRUFF benchmark set.
+## Notes
 
-- `stoich.sh`  
-  Shell helper for generating the stoichiometry figure workflow.
+**Filename conventions.** Several scripts and job files use the string `bmgn`; the manuscript refers to the BGMN refinement engine. These names are preserved verbatim to maintain correspondence between the code and the paper.
 
-## Notes on Naming
+**Benchmark scope.** The manuscript benchmark is restricted to RRUFF entries with `a, b, c ≤ 10 Å` to enable consistent lattice-parameter comparison across all tested structures.
 
-Some repository filenames use the string `bmgn`, while the manuscript discussion refers to the BGMN refinement engine. The filename convention is preserved here to match the code and job files exactly.
+**External dependencies.** The full pipeline interfaces with the AtomGPT.org AGAPI platform, the JARVIS and COD reference databases, GSAS-II, BGMN, and (optionally) ALIGNN-FF. Ensure these services and tools are accessible in your compute environment before running the benchmark jobs.
 
-## Data and Platform Context
-
-The AGAPI-XRD workflow interfaces with:
-
-- the AtomGPT.org AGAPI platform,
-- the JARVIS ecosystem,
-- the COD and JARVIS-DFT reference databases, and
-- the RRUFF powder XRD benchmark dataset.
-
-This repository is therefore best understood as the reproducibility and analysis companion to the manuscript, rather than as a standalone web service.
+---
 
 ## Citation
 
-If you use this repository, please cite the AGAPI-XRD paper and the corresponding JARVIS / AtomGPT ecosystem resources.
+If you use this code or data, please cite the AGAPI-XRD manuscript and the relevant JARVIS / AtomGPT ecosystem resources. Citation details will be updated upon publication.
+
+---
 
 ## Contact
 
-For scientific questions about the workflow, benchmark, or manuscript, please contact the corresponding authors listed in the paper.
+For questions regarding the workflow, benchmark, or manuscript, contact the corresponding authors listed in the paper.
