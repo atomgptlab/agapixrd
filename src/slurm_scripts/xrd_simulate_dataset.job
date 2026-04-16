@@ -1,0 +1,43 @@
+#!/bin/bash
+
+#SBATCH --job-name=xrd_sim
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --partition=nvl
+
+source ~/.bashrc
+eval "$(conda shell.bash hook)"
+conda activate jarvis
+
+export PYTHONUNBUFFERED=1
+export TQDM_MININTERVAL=0.1
+export TQDM_MINITERS=1
+
+echo "===== BEGIN BATCH SCRIPT: $0 ==="
+sed -n '1,99999p' "$0"
+echo "===== END BATCH SCRIPT ========="
+echo ""
+echo "===== BEGIN JOB METADATA ======="
+echo "Nodes:              ${SLURM_JOB_NUM_NODES}"
+echo "Tasks (ntasks):     ${SLURM_NTASKS:-1}"
+echo "CPUs per task:      ${SLURM_CPUS_PER_TASK:-1}"
+echo "CPUs per node:      ${SLURM_CPUS_ON_NODE:-unknown}"
+echo "Job CPUs/node map:  ${SLURM_JOB_CPUS_PER_NODE}"
+echo "===== END JOB METADATA ========="
+echo ""
+echo "===== START COMPUTATION ========"
+
+DATASET="alex_pbe_hull"
+OUTPUT_DIR="xrd_datasets/${DATASET}"
+NUM_WORKERS="${SLURM_CPUS_PER_TASK:-16}"
+
+mkdir -p "$OUTPUT_DIR"
+
+srun --unbuffered python src/agapi_xrd_scripts/xrd_simulate_alex_pbe_hull.py \
+    --dataset "$DATASET" \
+    --output-dir "$OUTPUT_DIR" \
+    --num-workers "$NUM_WORKERS" \
+    --shard-size 1000 \
+    --resume
+
+echo "===== JOB FINISHED ============="
