@@ -19,6 +19,7 @@ REFINEMENT_DIRS = {
     "bmgn": "BMGN",
     "bmgn_alignnff": "BMGN + ALIGNN-FF",
     "gsas2": "GSAS-II",
+    "gsas2_alignnff": "GSAS-II + ALIGNN-FF",
 }
 
 PARAMS = ["a", "b", "c", "alpha", "beta", "gamma"]
@@ -281,13 +282,13 @@ summary_path = RUNS / "refinement_mae_summary.csv"
 summary.to_csv(summary_path, index=False)
 print(f"DEBUG: Wrote summary -> {summary_path}", file=sys.stderr)
 
-# Full comparison figure: uses every method successfully found
-plot_all_path = RUNS / "refinement_mae_all_methods.png"
+# Full comparison figure: all 6 methods (no refinement, BMGN, GSAS-II, each with/without ALIGNN-FF)
+plot_all_path = RUNS / "refinement_mae_all6.png"
 plot_mae_figure(
     summary=summary,
     output_path=plot_all_path,
     title="Mean Absolute Error by Refinement Method",
-    figsize=(14, 8),
+    figsize=(16, 8),
 )
 
 # Second figure: no refinement, no refinement + ALIGNN-FF, BMGN, BMGN + ALIGNN-FF
@@ -320,7 +321,7 @@ display_cols = (
 
 print("\nMAE summary:")
 print(summary[display_cols].to_string(index=False))
-print(f"\nSaved full plot:        {plot_all_path}")
+print(f"\nSaved all-6 plot:       {plot_all_path}")
 print(f"Saved subset plot:      {plot_subset_path}")
 print(f"Saved summary:          {summary_path}")
 print("DEBUG: All done.", file=sys.stderr)
