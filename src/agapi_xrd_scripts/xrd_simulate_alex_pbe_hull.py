@@ -231,49 +231,66 @@ def run_dataset_mode(args):
     grand_total_shards = existing_shards + total_shards
     n_session_done = 0
 
+    # Build payloads lazily to avoid materialising all 100k+ dicts at once.
+    def _make_payload(i, e):
+        return {"jid": e.get("jid", f"entry_{i}"), "atoms_dict": e["atoms"], **sim_params}
+
+    # Bounded in-flight queue: avoids pickling all entries before tqdm starts
+    # and prevents OOM from holding O(N) Future objects simultaneously.
+    MAX_IN_FLIGHT = args.num_workers * 4
+    payload_iter = (_make_payload(i, e) for i, e in enumerate(to_process))
+    in_flight: dict = {}  # future -> jid
+
+    def _fill_queue(executor):
+        while len(in_flight) < MAX_IN_FLIGHT:
+            try:
+                p = next(payload_iter)
+                fut = executor.submit(_process_entry_worker, p)
+                in_flight[fut] = p["jid"]
+            except StopIteration:
+                break
+
     with open(errors_path, "a") as err_f:
         with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
-            payloads = [
-                {"jid": e.get("jid", f"entry_{i}"),
-                 "atoms_dict": e["atoms"],
-                 **sim_params}
-                for i, e in enumerate(to_process)
-            ]
-            futures = {executor.submit(_process_entry_worker, p): p["jid"]
-                       for p in payloads}
+            _fill_queue(executor)
+            with tqdm(total=len(to_process), desc="Simulating XRD") as pbar:
+                while in_flight:
+                    # as_completed on a snapshot; we mutate in_flight each iteration
+                    for future in as_completed(list(in_flight)):
+                        jid = in_flight.pop(future)
+                        _fill_queue(executor)
+                        pbar.update(1)
+                        n_session_done += 1
 
-            for future in tqdm(as_completed(futures), total=len(futures),
-                               desc="Simulating XRD"):
-                result = future.result()
-                n_session_done += 1
-                if result is None or result.get("__error__"):
-                    err_f.write(json.dumps({
-                        "jid": result["jid"] if result else futures[future],
-                        "error": result.get("error", "unknown") if result else "None returned",
-                    }) + "\n")
-                    err_f.flush()
-                    continue
+                        result = future.result()
+                        if result is None or result.get("__error__"):
+                            err_f.write(json.dumps({
+                                "jid": result["jid"] if result else jid,
+                                "error": result.get("error", "unknown") if result else "None returned",
+                            }) + "\n")
+                            err_f.flush()
+                            continue
 
-                records.append(result)
+                        records.append(result)
 
-                if len(records) >= args.shard_size:
-                    shard_path = output_dir / f"train-{shard_idx:05d}-of-{grand_total_shards:05d}.parquet"
-                    _write_shard(records[:args.shard_size], shard_path)
-                    n_done_total = already_done + n_session_done
-                    elapsed = time.time() - job_start_epoch
-                    rate = n_session_done / max(time.time() - session_start_epoch, 1e-6)
-                    remaining = grand_total - n_done_total
-                    eta_s = remaining / rate if rate > 0 else float("inf")
-                    eta_str = str(timedelta(seconds=int(eta_s))) if eta_s != float("inf") else "unknown"
-                    print(
-                        f"  [{datetime.now().strftime('%H:%M:%S')}] Wrote {shard_path.name} | "
-                        f"{n_done_total}/{grand_total} ({100*n_done_total/grand_total:.1f}%) | "
-                        f"rate {rate:.1f} struct/s | elapsed {timedelta(seconds=int(elapsed))} | "
-                        f"ETA {eta_str}",
-                        flush=True,
-                    )
-                    records = records[args.shard_size:]
-                    shard_idx += 1
+                        if len(records) >= args.shard_size:
+                            shard_path = output_dir / f"train-{shard_idx:05d}-of-{grand_total_shards:05d}.parquet"
+                            _write_shard(records[:args.shard_size], shard_path)
+                            n_done_total = already_done + n_session_done
+                            elapsed = time.time() - job_start_epoch
+                            rate = n_session_done / max(time.time() - session_start_epoch, 1e-6)
+                            remaining = grand_total - n_done_total
+                            eta_s = remaining / rate if rate > 0 else float("inf")
+                            eta_str = str(timedelta(seconds=int(eta_s))) if eta_s != float("inf") else "unknown"
+                            print(
+                                f"  [{datetime.now().strftime('%H:%M:%S')}] Wrote {shard_path.name} | "
+                                f"{n_done_total}/{grand_total} ({100*n_done_total/grand_total:.1f}%) | "
+                                f"rate {rate:.1f} struct/s | elapsed {timedelta(seconds=int(elapsed))} | "
+                                f"ETA {eta_str}",
+                                flush=True,
+                            )
+                            records = records[args.shard_size:]
+                            shard_idx += 1
 
         if records:
             shard_path = output_dir / f"train-{shard_idx:05d}-of-{grand_total_shards:05d}.parquet"
