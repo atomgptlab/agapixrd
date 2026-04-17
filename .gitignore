@@ -3,3 +3,5 @@ runs
 slurm-*
 rruff_stoich_output
 xrd_datasets
+**/gsas2.tar.gz
+
