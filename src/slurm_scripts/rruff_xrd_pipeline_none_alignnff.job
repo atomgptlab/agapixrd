@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=rruff_none_alignnff
-#SBATCH --output=%x_%j.out
-#SBATCH --error=%x_%j.err
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
 #SBATCH --ntasks-per-node=1
 
 source ~/.bashrc
