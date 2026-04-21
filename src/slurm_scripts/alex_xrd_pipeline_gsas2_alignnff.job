@@ -9,9 +9,6 @@
 source ~/.bashrc
 eval "$(conda shell.bash hook)"
 conda activate jarvis
-module load cuda/11.8
-nvidia-smi
-
 export PRINT_STRUCTURES=1
 export AtomGPT_COMPILE_DISABLE=1
 export PYTHONUNBUFFERED=1
@@ -47,5 +44,5 @@ if [[ ! -f key.txt ]]; then
 fi
 API_KEY="$(tr -d '\r\n' < key.txt)"
 
-srun --unbuffered mkdir -p runs/gsas2_alignnff && cd runs/gsas2_alignnff && python ../../src/agapi_xrd_scripts/alex_xrd_analysis.py --api-key "$API_KEY" --run-refinement --refinement-engine gsas2 --output-csv gsas2_alignnff_results.csv --output-poscars gsas2_alignnff_poscars.json --run-alignn --max-abc 10
+srun --unbuffered mkdir -p runs/gsas2_alignnff && cd runs/gsas2_alignnff && python ../../src/agapi_xrd_scripts/alex_xrd_analysis.py --api-key "$API_KEY" --run-refinement --refinement-engine gsas2 --output-csv gsas2_alignnff_results.csv --output-poscars gsas2_alignnff_poscars.json --run-alignn --max-abc 10 --dataset-path ../../xrd_datasets/alex_pbe_hull
 echo "===== JOB FINISHED ============="
