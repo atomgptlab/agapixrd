@@ -23,7 +23,7 @@ from jarvis.db.figshare import data as figshare_data
 DEFAULTS = dict(
     base_url="https://atomgpt.org",
     api_key="sk-",
-    method="both", wavelength=1.54184, max_entries=1000,
+    method="both", wavelength=1.54184, max_entries=0,
     max_abc=10,  # Max RRUFF a,b,c filter (Å) — None = no filter
     fallback_to_elements=True, run_refinement=False,
     refinement_engine="gsas2", preferred_orientation=False,

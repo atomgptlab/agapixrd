@@ -27,7 +27,7 @@ from jarvis.core.composition import Composition
 DEFAULTS = dict(
     base_url="https://atomgpt.org",
     api_key="sk-",
-    method="both", wavelength=1.54184, max_entries=1000,
+    method="both", wavelength=1.54184, max_entries=0,
     entry_offset=0,
     dataset_path="./xrd_datasets/alex_pbe_hull",
     fallback_to_elements=True, run_refinement=False,
