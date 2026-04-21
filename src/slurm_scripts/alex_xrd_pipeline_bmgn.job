@@ -44,5 +44,5 @@ if [[ ! -f key.txt ]]; then
 fi
 API_KEY="$(tr -d '\r\n' < key.txt)"
 
-srun --unbuffered mkdir -p runs/gsas2 && cd runs/gsas2 && python ../../src/agapi_xrd_scripts/rruff_xrd_analysis.py --api-key "$API_KEY" --run-refinement --refinement-engine gsas2 --output-csv gsas2_results.csv --output-poscars gsas2_poscars.json
+srun --unbuffered mkdir -p runs/bmgn && cd runs/bmgn && python ../../src/agapi_xrd_scripts/alex_xrd_analysis.py --api-key "$API_KEY" --run-refinement --refinement-engine bmgn --output-csv bmgn_results.csv --output-poscars bmgn_poscars.json --max-abc 10
 echo "===== JOB FINISHED ============="
