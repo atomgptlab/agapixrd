@@ -247,8 +247,8 @@ def plot_mae_figure(
         else 1.0
     )
 
-    ax.set_ylim(0, 1.15 * len_max if len_max > 0 else 1.0)
-    ax2.set_ylim(0, 1.15 * ang_max if ang_max > 0 else 1.0)
+    ax.set_ylim(0, 1.35 * len_max if len_max > 0 else 1.0)
+    ax2.set_ylim(0, 1.35 * ang_max if ang_max > 0 else 1.0)
 
     style_axes(ax, ax2, labels, title=title)
 

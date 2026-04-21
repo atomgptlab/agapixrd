@@ -1,7 +1,9 @@
 #!/bin/bash
 
-#SBATCH --job-name=diffract
-#SBATCH --ntasks-per-node=1             
+#SBATCH --job-name=rruff_bmgn_alignnff
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
+#SBATCH --ntasks-per-node=1
 #SBATCH --partition=nvl
 
 source ~/.bashrc

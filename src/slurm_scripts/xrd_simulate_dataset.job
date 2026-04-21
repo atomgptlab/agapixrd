@@ -1,6 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=xrd_sim
+#SBATCH --output=%x_%j.out
+#SBATCH --error=%x_%j.err
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --partition=nvl
