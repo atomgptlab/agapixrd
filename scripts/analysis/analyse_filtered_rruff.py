@@ -80,8 +80,20 @@ def ensure_output_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
+def _normalize_exp_prefix(df):
+    """Rename alex_* ground-truth columns to rruff_* so the rest of the script is prefix-agnostic."""
+    if "rruff_a" in df.columns:
+        return df
+    for prefix in ("alex_", "exp_"):
+        if f"{prefix}a" in df.columns:
+            rename = {c: c.replace(prefix, "rruff_", 1) for c in df.columns if c.startswith(prefix)}
+            return df.rename(columns=rename)
+    return df
+
+
 def load_and_filter(csv_path, val):
     df = pd.read_csv(csv_path)
+    df = _normalize_exp_prefix(df)
     print(f"Loaded {len(df)} entries from {csv_path}")
 
     mask = df["rruff_a"].notna() & df["pred_a"].notna()

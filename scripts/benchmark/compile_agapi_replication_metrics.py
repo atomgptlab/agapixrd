@@ -4,8 +4,9 @@ Compile reviewer-facing replication metrics for AGAPI-XRD runs.
 
 This script reads a text file whose non-empty, non-comment lines point to
 subdirectories of a runs/ directory (for example: bmgn, gsas2, no_refinement).
-For each listed run directory, it loads the saved outputs from the RRUFF AGAPI-XRD
-pipeline and recomputes manuscript-style metrics into a single JSON summary.
+For each listed run directory, it loads the saved outputs from the RRUFF or
+Alexandria AGAPI-XRD pipelines and recomputes manuscript-style metrics into a
+single JSON summary.
 
 Primary use:
     python compile_agapi_replication_metrics.py \
@@ -20,7 +21,9 @@ Accepted line formats inside --run-list:
     /absolute/path/to/runs/bmgn
 
 The script prefers a CSV summary inside each run directory and falls back to
-all_results_live.json when needed.
+all_results_live.json when needed. Alexandria runs use alex_* ground-truth
+lattice columns; these are normalized into the internal rruff_* metric columns
+so the same calculations are applied to both benchmark families.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ import pandas as pd
 PARAMS_ALL = ["a", "b", "c", "alpha", "beta", "gamma", "volume"]
 PARAMS_LENGTHS = ["a", "b", "c"]
 PARAMS_METHOD = ["a", "b", "c", "volume"]
+GROUND_TRUTH_PREFIXES = ("rruff", "alex")
 CRYSTAL_SYSTEM_ORDER = [
     "cubic",
     "orthorhombic",
@@ -216,6 +220,8 @@ REQUIRED_NUMERIC_COLUMNS = [
 ESSENTIAL_COLUMNS = [
     "mineral_name",
     "rruff_id",
+    "jid",
+    "entry_id",
     "formula",
     "elements",
     "query_used",
@@ -228,12 +234,45 @@ ESSENTIAL_COLUMNS = [
 ]
 
 
+def infer_ground_truth_prefix(df: pd.DataFrame, run_name: str) -> Optional[str]:
+    prefix_counts = {
+        prefix: sum(f"{prefix}_{p}" in df.columns for p in PARAMS_LENGTHS)
+        for prefix in GROUND_TRUTH_PREFIXES
+    }
+    best_prefix, best_count = max(prefix_counts.items(), key=lambda item: item[1])
+    if best_count > 0:
+        return best_prefix
+    if run_name.startswith("alex"):
+        return "alex"
+    if run_name.startswith("rruff") or run_name in {"no_refinement", "gsas2", "bmgn"}:
+        return "rruff"
+    return None
+
+
+def dataset_name_from_prefix(prefix: Optional[str]) -> str:
+    if prefix == "alex":
+        return "alexandria"
+    if prefix == "rruff":
+        return "rruff"
+    return "unknown"
+
+
+def ground_truth_label_from_prefix(prefix: Optional[str]) -> str:
+    if prefix == "alex":
+        return "alex"
+    if prefix == "rruff":
+        return "rruff"
+    return "unknown"
+
+
 def flatten_live_json(entries: List[Dict[str, Any]]) -> pd.DataFrame:
     rows: List[Dict[str, Any]] = []
     for entry in entries:
         row: Dict[str, Any] = {
             "mineral_name": entry.get("mineral_name"),
             "rruff_id": entry.get("rruff_id"),
+            "jid": entry.get("jid"),
+            "entry_id": entry.get("entry_id"),
             "formula": entry.get("formula"),
             "elements": entry.get("elements"),
             "query_used": entry.get("query_used"),
@@ -241,10 +280,14 @@ def flatten_live_json(entries: List[Dict[str, Any]]) -> pd.DataFrame:
             "time_s": entry.get("time_s"),
             "error": entry.get("error"),
         }
-        rc = entry.get("rruff_cell") or {}
+        rc = entry.get("rruff_cell") or entry.get("alex_cell") or {}
+        gt_prefix = "alex" if entry.get("alex_cell") and not entry.get("rruff_cell") else "rruff"
         for k in ["a", "b", "c", "alpha", "beta", "gamma", "volume"]:
-            row[f"rruff_{k}"] = rc.get(k)
-        row["rruff_crystal_system"] = rc.get("crystal_system")
+            row[f"{gt_prefix}_{k}"] = rc.get(k)
+        if gt_prefix == "rruff":
+            row["rruff_crystal_system"] = rc.get("crystal_system")
+        else:
+            row["alex_crystal_system"] = rc.get("crystal_system")
 
         pm = entry.get("pattern_matching") or {}
         row["pm_success"] = pm.get("success")
@@ -289,6 +332,7 @@ def load_run_dataframe(run_dir: Path) -> Tuple[pd.DataFrame, Dict[str, str]]:
         return finalize_dataframe(df, run_dir), provenance
 
     nested_csvs = sorted(run_dir.glob("rruff_results_*/results.csv"))
+    nested_csvs += sorted(run_dir.glob("alex_results_*/results.csv"))
     if nested_csvs:
         df = pd.read_csv(nested_csvs[-1])
         provenance["primary_file"] = str(nested_csvs[-1])
@@ -320,6 +364,20 @@ def load_run_dataframe(run_dir: Path) -> Tuple[pd.DataFrame, Dict[str, str]]:
 
 def finalize_dataframe(df: pd.DataFrame, run_dir: Path) -> pd.DataFrame:
     df = df.copy()
+    gt_prefix = infer_ground_truth_prefix(df, run_dir.name)
+
+    # The downstream metric functions historically use rruff_* names for the
+    # reference lattice. Copy Alexandria references into those internal slots so
+    # both benchmark families flow through the same code path.
+    if gt_prefix == "alex":
+        for param in PARAMS_ALL:
+            alex_col = f"alex_{param}"
+            rruff_col = f"rruff_{param}"
+            if alex_col in df.columns and rruff_col not in df.columns:
+                df[rruff_col] = df[alex_col]
+        if "alex_crystal_system" in df.columns and "rruff_crystal_system" not in df.columns:
+            df["rruff_crystal_system"] = df["alex_crystal_system"]
+
     for col in ESSENTIAL_COLUMNS:
         if col not in df.columns:
             df[col] = None
@@ -340,11 +398,9 @@ def finalize_dataframe(df: pd.DataFrame, run_dir: Path) -> pd.DataFrame:
         normalize_best_method(v, q) for v, q in zip(df["best_method"], df["query_used"])
     ]
     df["rruff_crystal_system_normalized"] = df["rruff_crystal_system"].map(normalize_crystal_system)
-
-    if "rruff_id" not in df.columns:
-        df["rruff_id"] = None
-    if "mineral_name" not in df.columns:
-        df["mineral_name"] = None
+    df["ground_truth_prefix"] = gt_prefix
+    df["ground_truth_dataset"] = dataset_name_from_prefix(gt_prefix)
+    df["ground_truth_label"] = ground_truth_label_from_prefix(gt_prefix)
 
     df["entry_key"] = df.apply(make_entry_key, axis=1)
     df["run_name"] = run_dir.name
@@ -355,9 +411,17 @@ def make_entry_key(row: pd.Series) -> str:
     rid = row.get("rruff_id")
     if rid is not None and str(rid).strip() and str(rid).strip().lower() != "nan":
         return f"rruff:{str(rid).strip()}"
+    jid = row.get("jid")
+    if jid is not None and str(jid).strip() and str(jid).strip().lower() != "nan":
+        return f"alex:{str(jid).strip()}"
+    entry_id = row.get("entry_id")
+    if entry_id is not None and str(entry_id).strip() and str(entry_id).strip().lower() != "nan":
+        return f"entry:{str(entry_id).strip()}"
     name = row.get("mineral_name")
     formula = row.get("formula")
-    return f"name:{str(name).strip()}|formula:{str(formula).strip()}"
+    if name is not None and str(name).strip() and str(name).strip().lower() != "nan":
+        return f"name:{str(name).strip()}|formula:{str(formula).strip()}"
+    return f"row:{row.name}|formula:{str(formula).strip()}"
 
 
 def complete_case_mask(df: pd.DataFrame, params: Iterable[str]) -> pd.Series:
@@ -656,17 +720,30 @@ def recoverable_benchmark_summary(
     raw_rruff_count: Optional[int],
     unique_valid_chemistry_count: Optional[int],
 ) -> Dict[str, Any]:
+    gt_prefix = next((x for x in df["ground_truth_prefix"].dropna().unique()), None)
+    dataset_name = dataset_name_from_prefix(gt_prefix)
     count_abc_present = int(df[["rruff_a", "rruff_b", "rruff_c"]].notna().all(axis=1).sum())
     count_complete_lattice = int(complete_case_mask(df, PARAMS_ALL).sum())
     crystal_counts = Counter(
         x for x in df["rruff_crystal_system_normalized"].tolist() if x is not None
     )
+    identifier_columns = [
+        col for col in ["rruff_id", "jid", "entry_id", "mineral_name"]
+        if col in df.columns and df[col].notna().any()
+    ]
+    has_crystal_system = bool(df["rruff_crystal_system_normalized"].notna().any())
     return {
-        "raw_rruff_entries": raw_rruff_count,
-        "unique_valid_chemistry": unique_valid_chemistry_count,
+        "ground_truth_dataset": dataset_name,
+        "ground_truth_prefix": gt_prefix,
+        "ground_truth_label": ground_truth_label_from_prefix(gt_prefix),
+        "raw_rruff_entries": raw_rruff_count if dataset_name == "rruff" else None,
+        "unique_valid_chemistry": unique_valid_chemistry_count if dataset_name == "rruff" else None,
         "total_entries_processed": int(len(df)),
         "entries_with_rruff_abc": count_abc_present,
+        "entries_with_ground_truth_abc": count_abc_present,
         "entries_with_complete_lattice": count_complete_lattice,
+        "identifier_columns_available": identifier_columns,
+        "has_crystal_system_labels": has_crystal_system,
         "crystal_system_counts": {k: int(crystal_counts.get(k, 0)) for k in CRYSTAL_SYSTEM_ORDER},
     }
 
@@ -678,10 +755,16 @@ def summarize_run(
     provenance: Dict[str, str],
     args: argparse.Namespace,
 ) -> Dict[str, Any]:
+    gt_prefix = next((x for x in df["ground_truth_prefix"].dropna().unique()), None)
     return {
         "run_name": run_name,
         "run_directory": str(run_dir),
-        "source": provenance,
+        "source": {
+            **provenance,
+            "ground_truth_dataset": dataset_name_from_prefix(gt_prefix),
+            "ground_truth_prefix": gt_prefix,
+            "ground_truth_label": ground_truth_label_from_prefix(gt_prefix),
+        },
         "benchmark_summary": recoverable_benchmark_summary(
             df,
             raw_rruff_count=args.raw_rruff_count,
@@ -749,6 +832,25 @@ def common_entry_count(dfs: Dict[str, pd.DataFrame]) -> int:
     return int(len(common))
 
 
+def dataset_group_summaries(run_dataframes: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+    grouped: Dict[str, Dict[str, pd.DataFrame]] = {}
+    for run_name, df in run_dataframes.items():
+        dataset = next((x for x in df["ground_truth_dataset"].dropna().unique()), "unknown")
+        grouped.setdefault(str(dataset), {})[run_name] = df
+
+    return {
+        dataset: {
+            "run_order": list(group_dfs.keys()),
+            "n_runs": len(group_dfs),
+            "common_entry_count": common_entry_count(group_dfs),
+            "total_entries_by_run": {
+                run_name: int(len(df)) for run_name, df in group_dfs.items()
+            },
+        }
+        for dataset, group_dfs in grouped.items()
+    }
+
+
 def build_cross_run_summary(
     run_dataframes: Dict[str, pd.DataFrame],
     run_summaries: Dict[str, Dict[str, Any]],
@@ -770,6 +872,12 @@ def build_cross_run_summary(
         "run_order": list(run_dataframes.keys()),
         "n_runs": len(run_dataframes),
         "common_entry_count": common_entry_count(run_dataframes),
+        "common_entry_count_note": (
+            "Computed across every requested run. This is expected to be 0 when "
+            "RRUFF and Alexandria runs are compiled together because they use "
+            "different entry identifiers."
+        ),
+        "dataset_groups": dataset_group_summaries(run_dataframes),
         "refinement_comparison": per_run_refinement_comparison(run_summaries),
         "pairwise_run_comparisons": pairwise,
     }

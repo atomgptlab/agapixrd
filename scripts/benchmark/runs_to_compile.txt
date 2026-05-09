@@ -1,3 +1,12 @@
-no_refinement
-gsas2
-bmgn
+rruff_no_refinement
+rruff_no_refinement_alignnff
+rruff_bmgn
+rruff_bmgn_alignnff
+rruff_gsas2
+rruff_gsas2_alignnff
+alex_no_refinement
+alex_no_refinement_alignnff
+alex_bmgn
+alex_bmgn_alignnff
+alex_gsas2
+alex_gsas2_alignnff

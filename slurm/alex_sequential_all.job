@@ -1,0 +1,84 @@
+#!/bin/bash
+
+#SBATCH --job-name=alex_sequential_all
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=3-00:00:00
+#SBATCH --partition=nvl
+
+source ~/.bashrc
+eval "$(conda shell.bash hook)"
+conda activate jarvis
+
+export PRINT_STRUCTURES=1
+export AtomGPT_COMPILE_DISABLE=1
+export PYTHONUNBUFFERED=1
+export TQDM_MININTERVAL=0.1
+export TQDM_MINITERS=1
+export HF_HOME=/scratch/kchoudh2/$USER/hf_home
+export HUGGINGFACE_HUB_CACHE=/scratch/kchoudh2/$USER/hf_home/hub
+export TRANSFORMERS_CACHE=/scratch/kchoudh2/$USER/hf_home/transformers
+export HF_DATASETS_CACHE=/scratch/kchoudh2/$USER/hf_home/datasets
+export ATOMGPT_PATH=~/repositories/atomgpt_jhu
+
+echo "===== BEGIN BATCH SCRIPT: $0 ==="
+sed -n '1,99999p' "$0"
+echo "===== END BATCH SCRIPT ========="
+echo ""
+echo "===== BEGIN JOB METADATA ======="
+echo "Nodes:              ${SLURM_JOB_NUM_NODES}"
+echo "Tasks (ntasks):     ${SLURM_NTASKS:-1}"
+echo "CPUs per task:      ${SLURM_CPUS_PER_TASK:-1}"
+echo "CPUs per node:      ${SLURM_CPUS_ON_NODE:-unknown}"
+echo "Job CPUs/node map:  ${SLURM_JOB_CPUS_PER_NODE}"
+echo "GPUs (job):         ${SLURM_JOB_GPUS:-${SLURM_GPUS:-0}}"
+echo "GPUs per node:      ${SLURM_GPUS_PER_NODE}"
+echo "GPUs per task:      ${SLURM_GPUS_PER_TASK}"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
+echo "===== END JOB METADATA ========="
+echo ""
+echo "===== START COMPUTATION ========"
+
+PROJECT_ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
+PYTHON=/home/ccamp104/scratchkchoudh2/ccamp104/miniconda3/envs/jarvis/bin/python
+SCRIPT="$PROJECT_ROOT/scripts/benchmark/alex_xrd_analysis.py"
+DATASET="$PROJECT_ROOT/xrd_datasets/alex_pbe_hull"
+RUNS_DIR="$PROJECT_ROOT/runs"
+
+if [[ ! -f "$PROJECT_ROOT/key.txt" ]]; then
+    echo "ERROR: key.txt not found in $PROJECT_ROOT"
+    exit 1
+fi
+API_KEY="$(tr -d '\r\n' < "$PROJECT_ROOT/key.txt")"
+
+# Run one pipeline. Resume is on by default: if the job is resubmitted after
+# hitting the time limit, cached entries are skipped and processing continues
+# from where it left off.
+run_pipeline() {
+    local name="$1"; shift
+    local run_dir="$RUNS_DIR/$name"
+    mkdir -p "$run_dir"
+    echo "===== STARTING: $name ====="
+    echo "  cache entries before start: $(find "$run_dir/.alex_cache" -name '*.json' 2>/dev/null | wc -l)"
+    "$PYTHON" "$SCRIPT" \
+        --api-key "$API_KEY" \
+        --dataset-path "$DATASET" \
+        --max-abc 10 \
+        --output-csv "$run_dir/${name}_results.csv" \
+        --output-poscars "$run_dir/${name}_poscars.json" \
+        "$@"
+    local exit_code=$?
+    echo "===== FINISHED: $name (exit $exit_code) ====="
+    echo ""
+    return $exit_code
+}
+
+run_pipeline alex_sequential_no_refinement
+run_pipeline alex_sequential_no_refinement_alignnff  --run-alignn
+run_pipeline alex_sequential_bmgn                    --run-refinement --refinement-engine bmgn
+run_pipeline alex_sequential_bmgn_alignnff           --run-refinement --refinement-engine bmgn  --run-alignn
+run_pipeline alex_sequential_gsas2                   --run-refinement --refinement-engine gsas2
+run_pipeline alex_sequential_gsas2_alignnff          --run-refinement --refinement-engine gsas2 --run-alignn
+
+echo "===== ALL PIPELINES FINISHED ============="

@@ -1,0 +1,84 @@
+#!/bin/bash
+
+#SBATCH --job-name=rruff_resume_seq
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+#SBATCH --ntasks-per-node=1
+#SBATCH --partition=nvl
+
+source ~/.bashrc
+eval "$(conda shell.bash hook)"
+conda activate jarvis
+module load cuda/11.8
+nvidia-smi
+
+export PRINT_STRUCTURES=1
+export AtomGPT_COMPILE_DISABLE=1
+export PYTHONUNBUFFERED=1
+export TQDM_MININTERVAL=0.1
+export TQDM_MINITERS=1
+export HF_HOME=/scratch/kchoudh2/$USER/hf_home
+export HUGGINGFACE_HUB_CACHE=/scratch/kchoudh2/$USER/hf_home/hub
+export TRANSFORMERS_CACHE=/scratch/kchoudh2/$USER/hf_home/transformers
+export HF_DATASETS_CACHE=/scratch/kchoudh2/$USER/hf_home/datasets
+export ATOMGPT_PATH=~/repositories/atomgpt_jhu
+
+echo "===== BEGIN BATCH SCRIPT: $0 ==="
+sed -n '1,99999p' "$0"
+echo "===== END BATCH SCRIPT ========="
+echo ""
+echo "===== BEGIN JOB METADATA ======="
+echo "Nodes:              ${SLURM_JOB_NUM_NODES}"
+echo "Tasks (ntasks):     ${SLURM_NTASKS:-1}"
+echo "CPUs per task:      ${SLURM_CPUS_PER_TASK:-1}"
+echo "CPUs per node:      ${SLURM_CPUS_ON_NODE:-unknown}"
+echo "Job CPUs/node map:  ${SLURM_JOB_CPUS_PER_NODE}"
+echo "GPUs (job):         ${SLURM_JOB_GPUS:-${SLURM_GPUS:-0}}"
+echo "GPUs per node:      ${SLURM_GPUS_PER_NODE}"
+echo "GPUs per task:      ${SLURM_GPUS_PER_TASK}"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
+echo "===== END JOB METADATA ========="
+echo ""
+echo "===== START COMPUTATION ========"
+
+# Resolve project root from the location of this script (slurm/)
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHON=/home/ccamp104/scratchkchoudh2/ccamp104/miniconda3/envs/jarvis/bin/python
+SCRIPT="$PROJECT_ROOT/scripts/benchmark/rruff_xrd_analysis.py"
+RUNS_DIR="$PROJECT_ROOT/runs"
+
+if [[ ! -f "$PROJECT_ROOT/key.txt" ]]; then
+    echo "ERROR: key.txt not found in $PROJECT_ROOT"
+    exit 1
+fi
+API_KEY="$(tr -d '\r\n' < "$PROJECT_ROOT/key.txt")"
+
+# Helper: run one pipeline, resuming from existing .rruff_cache.
+# Resume is the default (no --no-resume flag), so the script automatically
+# loads any entries already cached in <run_dir>/.rruff_cache and skips them.
+# Passing absolute paths for --output-csv ensures work_dir resolves to the
+# correct run directory regardless of the shell's current working directory.
+run_pipeline() {
+    local name="$1"; shift
+    local run_dir="$RUNS_DIR/$name"
+    mkdir -p "$run_dir"
+    echo "===== STARTING: $name ====="
+    echo "  cache entries before start: $(find "$run_dir/.rruff_cache" -name '*.json' 2>/dev/null | wc -l)"
+    "$PYTHON" "$SCRIPT" --api-key "$API_KEY" "$@" \
+        --output-csv "$run_dir/${name}_results.csv" \
+        --output-poscars "$run_dir/${name}_poscars.json" \
+        --max-abc 10
+    local exit_code=$?
+    echo "===== FINISHED: $name (exit $exit_code) ====="
+    echo ""
+    return $exit_code
+}
+
+run_pipeline rruff_bmgn             --run-refinement --refinement-engine bmgn
+run_pipeline rruff_bmgn_alignnff    --run-refinement --refinement-engine bmgn  --run-alignn
+run_pipeline rruff_gsas2            --run-refinement --refinement-engine gsas2
+run_pipeline rruff_gsas2_alignnff   --run-refinement --refinement-engine gsas2 --run-alignn
+run_pipeline rruff_no_refinement
+run_pipeline rruff_no_refinement_alignnff                                       --run-alignn
+
+echo "===== ALL PIPELINES FINISHED ============="

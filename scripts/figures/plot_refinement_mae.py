@@ -13,14 +13,24 @@ import matplotlib.pyplot as plt
 
 
 # ───────────────────────── config / labels ─────────────────────────
-REFINEMENT_DIRS = {
-    "no_refinement": "No refinement",
-    "no_refinement_alignnff": "No refinement + ALIGNN-FF",
-    "bmgn": "BMGN",
-    "bmgn_alignnff": "BMGN + ALIGNN-FF",
-    "gsas2": "GSAS-II",
-    "gsas2_alignnff": "GSAS-II + ALIGNN-FF",
-}
+def load_refinement_dirs(path: Path) -> dict[str, str]:
+    """Parse a text file of refinement directory names, one per line."""
+    dirs = {}
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        dirs[line] = line
+    if not dirs:
+        print(f"ERROR: No entries found in {path}", file=sys.stderr)
+        sys.exit(1)
+    return dirs
+
+if len(sys.argv) < 2:
+    print("Usage: plot_refinement_mae.py <dir_list.txt>", file=sys.stderr)
+    sys.exit(1)
+
+REFINEMENT_DIRS = load_refinement_dirs(Path(sys.argv[1]))
 
 PARAMS = ["a", "b", "c", "alpha", "beta", "gamma"]
 
@@ -82,12 +92,21 @@ def newest_results_csv(run_dir: Path) -> Path | None:
     return None
 
 
+def find_exp_col(df: pd.DataFrame, param: str) -> str | None:
+    """Find the ground-truth column for a lattice parameter by trying known prefixes."""
+    for prefix in ("rruff_", "alex_"):
+        col = f"{prefix}{param}"
+        if col in df.columns:
+            return col
+    return None
+
+
 def compute_mae(df: pd.DataFrame, param: str):
     """Return (mae, n_valid) for one lattice parameter."""
-    exp_col = f"rruff_{param}"
+    exp_col = find_exp_col(df, param)
     pred_col = f"pred_{param}"
 
-    if exp_col not in df.columns or pred_col not in df.columns:
+    if exp_col is None or pred_col not in df.columns:
         return np.nan, 0
 
     sub = df[[exp_col, pred_col]].dropna()
@@ -278,37 +297,19 @@ print(f"DEBUG: Using runs directory: {RUNS}", file=sys.stderr)
 
 summary = build_summary(RUNS)
 
-summary_path = RUNS / "refinement_mae_summary.csv"
+dir_list_stem = Path(sys.argv[1]).stem
+summary_path = RUNS / f"refinement_mae_summary_{dir_list_stem}.csv"
 summary.to_csv(summary_path, index=False)
 print(f"DEBUG: Wrote summary -> {summary_path}", file=sys.stderr)
 
-# Full comparison figure: all 6 methods (no refinement, BMGN, GSAS-II, each with/without ALIGNN-FF)
-plot_all_path = RUNS / "refinement_mae_all6.png"
+plot_path = RUNS / f"refinement_mae_{dir_list_stem}.png"
+n_methods = len(summary)
+figsize = (max(10, 2.5 * n_methods), 8)
 plot_mae_figure(
     summary=summary,
-    output_path=plot_all_path,
+    output_path=plot_path,
     title="Mean Absolute Error by Refinement Method",
-    figsize=(16, 8),
-)
-
-# Second figure: no refinement, no refinement + ALIGNN-FF, BMGN, BMGN + ALIGNN-FF
-comparison_keys = [
-    "no_refinement",
-    "no_refinement_alignnff",
-    "bmgn",
-    "bmgn_alignnff",
-]
-
-comparison_subset = summary[
-    summary["refinement_key"].isin(comparison_keys)
-].copy()
-
-plot_subset_path = RUNS / "refinement_mae_no_refinement_and_bmgn_alignnff_comparison.png"
-plot_mae_figure(
-    summary=comparison_subset,
-    output_path=plot_subset_path,
-    title="No Refinement vs. No Refinement + ALIGNN-FF vs. BMGN vs. BMGN + ALIGNN-FF\nMean Absolute Error",
-    figsize=(13, 8),
+    figsize=figsize,
 )
 
 # ───────────────────────── console summary ─────────────────────────
@@ -321,7 +322,6 @@ display_cols = (
 
 print("\nMAE summary:")
 print(summary[display_cols].to_string(index=False))
-print(f"\nSaved all-6 plot:       {plot_all_path}")
-print(f"Saved subset plot:      {plot_subset_path}")
-print(f"Saved summary:          {summary_path}")
+print(f"\nSaved plot:    {plot_path}")
+print(f"Saved summary: {summary_path}")
 print("DEBUG: All done.", file=sys.stderr)
