@@ -1,14 +1,16 @@
 #!/bin/bash
 
-#SBATCH --job-name=alex_gsas2_alignnff
+#SBATCH --job-name=rruff_gsas2
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --ntasks-per-node=1
-#SBATCH --partition=nvl
 
 source ~/.bashrc
 eval "$(conda shell.bash hook)"
 conda activate jarvis
+module load cuda/11.8
+nvidia-smi
+
 export PRINT_STRUCTURES=1
 export AtomGPT_COMPILE_DISABLE=1
 export PYTHONUNBUFFERED=1
@@ -44,5 +46,5 @@ if [[ ! -f key.txt ]]; then
 fi
 API_KEY="$(tr -d '\r\n' < key.txt)"
 
-srun --unbuffered mkdir -p runs/alex_gsas2_alignnff && cd runs/alex_gsas2_alignnff && python ../../src/agapi_xrd_scripts/alex_xrd_analysis.py --api-key "$API_KEY" --run-refinement --refinement-engine gsas2 --output-csv alex_gsas2_alignnff_results.csv --output-poscars alex_gsas2_alignnff_poscars.json --run-alignn --max-abc 10 --dataset-path ../../xrd_datasets/alex_pbe_hull
+srun --unbuffered mkdir -p runs/rruff_gsas2 && cd runs/rruff_gsas2 && python ../../scripts/benchmark/rruff_xrd_analysis.py --api-key "$API_KEY" --run-refinement --refinement-engine gsas2 --output-csv rruff_gsas2_results.csv --output-poscars rruff_gsas2_poscars.json --max-abc 10
 echo "===== JOB FINISHED ============="

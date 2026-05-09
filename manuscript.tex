@@ -1,0 +1,581 @@
+\documentclass[pdflatex,sn-mathphys-num]{sn-jnl}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{amsthm}
+\usepackage{mathrsfs}
+\usepackage[title]{appendix}
+\usepackage{xcolor}
+\usepackage{textcomp}
+\usepackage{manyfoot}
+\usepackage{booktabs}
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{url}
+
+\theoremstyle{thmstyleone}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\theoremstyle{thmstyletwo}
+\newtheorem{example}{Example}
+\newtheorem{remark}{Remark}
+\theoremstyle{thmstylethree}
+\newtheorem{definition}{Definition}
+\raggedbottom
+
+\begin{document}
+
+\title{AGAPI-XRD: Hybrid DiffractGPT-Rietveld Refinement Framework for Automated X-ray Diffraction Analysis}
+\author[1,4]{Charles Rhys Campbell}
+\author[2]{Justin Ely}
+\author[2]{Jaehyung Lee}
+\author[3,1]{Frank Abel}
+\author[1,2*]{Kamal Choudhary}
+
+\affil[1]{Department of Materials Science and Engineering, Johns Hopkins University, Baltimore, MD 21218, USA}
+\affil[2]{Department of Electrical and Computer Engineering, Johns Hopkins University, Baltimore, MD 21218, USA}
+\affil[3]{The Volgenau Department of Physics, United States Naval Academy, Annapolis, MD 21402, USA}
+\affil[4]{Department of Physics and Astronomy, West Virginia University, Morgantown, WV 26505, USA}
+
+\affil[*]{Corresponding author: kchoudh2@jhu.edu}
+
+\maketitle
+
+\begin{abstract}
+XX-ray diffraction (XRD) remains one of the most powerful and commonly used experimental techniques 
+for structural characterization of materials, yet the path from raw diffraction data to a refined 
+atomic structure continues to demand significant domain expertise and manual 
+intervention. We present AGAPI-XRD, a hybrid computational framework that integrates 
+DiffractGPT, a generative pretrained transformer trained on thousands of crystal 
+structures and their simulated XRD patterns, elemental and stoichoimetric pattern-matching with the JARVIS-DFT and COD materials databases, and classical Rietveld refinement 
+into a unified, accessible API hosted on the AtomGPT.org API (AGAPI) platform. 
+DiffractGPT can rapidly predict candidate atomic structures from experimental XRD 
+patterns. These AI-generated structures then serve as high-quality starting 
+configurations for automated Rietveld refinement, dramatically reducing sensitivity 
+to initial guess quality and accelerating convergence. The combined pipeline is 
+exposed through the AGAPI interface at \url{https://atomgpt.org/xrd}, enabling 
+seamless programmatic access for experimentalists, high-throughput screening 
+workflows, and integration with broader agentic AI frameworks for materials 
+discovery. We benchmark our approach on 276 minerals from the RRUFF powder XRD 
+database and on six Alexandria PBE-hull simulated-XRD runs containing 
+9{,}328--12{,}060 structures per workflow. On RRUFF, AGAPI-XRD achieves 96.7\% 
+structure identification coverage and positive skill scores across all lattice 
+dimensions and volume. On Alexandria, the combined pattern-matching and 
+DiffractGPT workflow recovers candidate structures for 94.9--96.2\% of entries, 
+with lattice-length MAEs of 0.72--1.28~\AA{} across the tested refinement and 
+ALIGNN-FF settings. Performance is stratified by identification method, crystal 
+system, and elemental composition, revealing that pattern matching against 
+JARVIS-DFT and COD databases provides the highest accuracy, while DiffractGPT 
+extends coverage to complex materials absent from existing databases. 
+By bridging generative AI with established crystallographic refinement, AGAPI-XRD 
+lowers the barrier to automated structure determination and advances the vision of 
+fully autonomous materials characterization pipelines.
+\end{abstract}
+
+\keywords{X-ray diffraction, Rietveld refinement, generative AI, crystal structure determination, materials informatics}
+
+
+%% =========================================================================
+%%  INTRODUCTION
+%% =========================================================================
+\section{Introduction}\label{sec:intro}
+
+X-ray diffraction (XRD) is the cornerstone of crystallographic characterization, providing direct access to the periodic arrangement of atoms in solids~\cite{cullity2001, warren1990}. Since the pioneering work of Bragg and the development of powder diffraction methods, XRD has been indispensable for phase identification, lattice parameter determination, and full structural refinement across virtually every class of crystalline material~\cite{rietveld1969, young1993}. The introduction of Rietveld refinement in 1969 transformed powder diffraction from a qualitative fingerprinting technique into a quantitative structural tool, enabling the extraction of atomic positions, thermal parameters, and site occupancies from polycrystalline data~\cite{rietveld1969}.
+
+Despite these advances, the conventional workflow from experimental diffraction pattern to refined crystal structure remains labor-intensive. A typical analysis requires: (i)~phase identification through manual comparison with reference databases such as the Powder Diffraction File (PDF)~\cite{gates2019}, the Crystallography Open Database (COD)~\cite{grazulis2012}, or the Inorganic Crystal Structure Database (ICSD)~\cite{bergerhoff1987}; (ii)~selection of an appropriate structural model as a starting point; (iii)~iterative Rietveld refinement with careful sequential release of parameters~\cite{toby2013}; and (iv)~validation of the refined structure against chemical and physical constraints. Each step demands significant domain expertise, and the quality of the final result depends critically on the initial structural guess, and a poor starting model can lead to convergence at physically meaningless local minima or outright divergence of the refinement~\cite{mccusker1999}.
+
+The advent of machine learning (ML) in materials science has begun to transform many aspects of computational materials research~\cite{choudhary2022review, butler2018, schmidt2019}. Graph neural networks such as ALIGNN and ALIGNN-FF~\cite{alignn2021,choudhary2023unified} have achieved remarkable accuracy in predicting material properties from crystal structures and optimizing atomic structure geometries. Generative models including variational autoencoders~\cite{court2020}, generative adversarial networks~\cite{kim2020gan}, and diffusion models~\cite{xie2022cdvae} have demonstrated the ability to design new crystal structures with targeted properties. More recently, large language models have been applied to materials science through frameworks such as AtomGPT~\cite{atomgpt2024,diffractgpt2025,choudhary2025microscopygpt}, which uses instruction-tuned transformers to predict material properties and generate crystal structures from text descriptions.
+
+Several groups have applied ML specifically to XRD analysis. Park et al.\ developed convolutional neural networks for crystal system classification from powder patterns~\cite{park2017}. Lee et al.\ used deep learning for automated phase identification~\cite{lee2020xrd}. Vecsei et al.\ demonstrated neural network-based lattice parameter extraction~\cite{vecsei2019}. However, these approaches typically address individual components of the analysis pipeline rather than providing end-to-end structure determination. DiffractGPT~\cite{diffractgpt2025} introduced a fundamentally different approach: a generative pretrained transformer that directly predicts complete atomic structures (including lattice parameters, space group, and atomic coordinates) from experimental XRD peak positions and chemical composition. Trained on simulated XRD patterns from the JARVIS-DFT database~\cite{jarvis2020}, DiffractGPT performs rapid inverse design, generating candidate structures in seconds rather than the hours or days required by traditional \textit{ab initio} structure solution methods.
+
+In parallel, the JARVIS (Joint Automated Repository for Various Integrated Simulations) ecosystem~\cite{jarvis2020,choudhary2025jarvis} has established one of the largest open-access computational materials databases, comprising over one million density functional theory (DFT) calculations with consistently computed properties. The JARVIS infrastructure, including databases, tools, and machine learning models, is accessible through the AGAPI (AtomGPT.org API) platform~\cite{agapi2025} at \url{https://atomgpt.org}, which provides programmatic access to the full suite of materials informatics capabilities.
+
+Here we present AGAPI-XRD, a hybrid framework that combines three complementary approaches into a single automated pipeline: (1)~pattern matching against the combined JARVIS-DFT (${\sim}76{,}000$ entries) and COD (${\sim}400{,}000$ entries) structure databases for rapid identification of known phases; (2)~DiffractGPT generative structure prediction for novel phases absent from existing databases; (3)~classical Rietveld refinement (via GSAS-II~\cite{toby2013} or BGMN~\cite{bgmn1998}) for quantitative structural optimization; (4) optional ALIGNN-FF structure optimization \cite{choudhary2023unified}; (5) ALIGNN \cite{alignn2021}/SlaKoNet property predictions \cite{slakonet2024}. We benchmark this pipeline on 276 crystals from the RRUFF powder XRD database~\cite{rruff2015} and on a larger Alexandria PBE-hull simulated-XRD benchmark~\cite{alexandria}, providing a systematic evaluation of combined AI, database-driven, and XRD structure identification against both experimentally characterized natural minerals and high-throughput DFT reference structures.
+
+
+%% =========================================================================
+%%  METHODS
+%% =========================================================================
+\section{Results \& Discussion}\label{sec:results}
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/workflow_diagram.png}
+\caption{\textbf{Schematic of the AGAPI-XRD pipeline.} An experimental powder XRD pattern and chemical formula/elements are submitted to the AtomGPT.org API, which executes a multi-stage workflow. \textbf{Stage~1:} Pattern matching against the combined JARVIS-DFT (${\sim}76{,}000$ entries) and COD (${\sim}400{,}000$ entries) databases using cosine similarity on common-binned intensity profiles. Formula-based search is attempted first; if unsuccessful, a fallback element-based compositional search is triggered. \textbf{Stage~2:} If the pattern is not matched, DiffractGPT generative structure prediction using a fine-tuned Mistral-7B pretrained transformer, which takes extracted peak positions and the chemical formula as input and generates complete lattice parameters, space group, and atomic coordinates. \textbf{Stage~3:} Optional structural relaxation with ALIGNN-FF, or another ML force fields, as well as an automated Rietveld refinement via GSAS-II or BGMN with sequential cumulative parameter optimization. \textbf{Stage~4:} Optional ML property predictions via ALIGNN (formation energy, band gap, elastic moduli, superconducting $T_c$) and SlakoNet (tight-binding band structure). The pipeline returns the best-matching crystal structure as a POSCAR file in conjunction with full metadata, similarity scores, refinement statistics, and predicted properties.}
+\label{fig:schematic}
+\end{figure}
+\subsection{AGAPI-XRD Pipeline Architecture}\label{sec:pipeline}
+
+The AGAPI-XRD pipeline is implemented as a RESTful API endpoint (\texttt{/xrd/analyze\_with\_refinement}) within the AtomGPT.org platform (Figure~\ref{fig:schematic}). For a given XRD spectrum and corresponding stoichiometry, the pipeline executes a multi-stage workflow:
+
+\textbf{Stage~1: Pattern Matching.}
+The experimental XRD pattern and chemical formula are compared against the combined JARVIS-DFT and COD databases. For each candidate structure, a theoretical powder XRD pattern is simulated using the kinematic diffraction approximation implemented in the JARVIS analysis module~\cite{jarvis2020}. The similarity between experimental and calculated patterns is quantified by cosine similarity computed on re-binned intensity profiles:
+\begin{equation}
+S = \frac{\mathbf{y}_{\mathrm{exp}} \cdot \mathbf{y}_{\mathrm{calc}}}
+         {\|\mathbf{y}_{\mathrm{exp}}\| \; \|\mathbf{y}_{\mathrm{calc}}\|}
+\label{eq:cosine}
+\end{equation}
+where $\mathbf{y}_{\mathrm{exp}}$ and $\mathbf{y}_{\mathrm{calc}}$ are the normalized intensity vectors re-binned onto a common $2\theta$ grid with $0.1^\circ$ spacing over the range $0$--$90^\circ$. Formula-based search is first attempted using reduced chemical formulas comparison with JARVIS-DFT and COD structures. If no match is found, a fallback element-based search is triggered using comma-separated constituent elements, which queries both databases for structures containing the same elemental combination. If no structure is found in either database that share an XRD spectrum and stoichiometry with the candidate crystal, the pipeline proceeds to Stage 2.
+
+\textbf{Stage~2: DiffractGPT Structure Generation.}
+In parallel (or as a complement to pattern matching), DiffractGPT generates candidate crystal structures directly from the XRD data. Peak positions and relative intensities are extracted from the experimental pattern using the \texttt{scipy.signal.find\_peaks} algorithm with height threshold 0.05, prominence 0.02, and adaptive distance parameter. The top~20 peaks (sorted by intensity) are formatted as a text prompt along with the chemical formula and submitted to the DiffractGPT model, a Mistral-7B architecture fine-tuned on JARVIS-DFT structure--XRD pairs~\cite{diffractgpt2025}. The model generates a complete structural description including lattice parameters, angles, and fractional atomic coordinates.
+
+\textbf{Stage~3: ALIGNN-FF Structural Relaxation (optional).}
+The candidate structure can be further relaxed using ALIGNN-FF to reduce local geometric artifacts and provide a more physically plausible starting point for subsequent Rietveld refinement. This step is particularly useful for AI-generated structures, where small errors in atomic positions or lattice geometry can impede refinement convergence.
+
+\textbf{Stage~4: Rietveld Refinement.}
+The best structure from Stages~1--2 serves as the initial model for automated Rietveld refinement. Two refinement engines are supported: GSAS-II~\cite{toby2013} via its scriptable Python interface, and BGMN~\cite{bgmn1998} via the \texttt{dara.refine} package. Refinement proceeds through a sequential cumulative strategy: background (12-term Chebyshev polynomial), unit cell parameters, instrument zero point, profile parameters ($U$, $V$, $W$, $X$, $Y$, SH/L), and sample displacement. An optional March--Dollase preferred orientation correction can be enabled. The weighted profile R-factor ($R_{\mathrm{wp}}$) serves as the primary figure of merit.
+
+\textbf{Stage~5: Property Predictions (optional).}
+The identified structure can be passed to ALIGNN~\cite{alignn2021} for rapid ML-based property predictions (formation energy, band gap, elastic moduli, superconducting $T_c$) and to SlaKoNet~\cite{slakonet2024} for tight-binding electronic structure calculations, providing immediate materials informatics context for the identified phase.
+
+
+\subsection{Benchmark Datasets: RRUFF Minerals and Alexandria PBE Hull}\label{sec:dataset}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.7\linewidth]{figures/pie_chart_umap.png}
+\caption{\textbf{Visualization of computational and experimental x-ray diffraction dataset.} (a) Converted 76,000 materials in JARVIS-DFT and 400,000 materials in COD database and visualized using UMAP using space group as a color bar. We observed clusters of high-symmetry space groups, especially blue and green space group labels. (b) Elemental composition of the experimental RRUFF database on which the AGAPI-XRD framework will be tested. The top nine most common elements are shown.}
+\label{fig:element_freq}
+\end{figure}
+
+The RRUFF Project~\cite{rruff2015} provides high-quality powder XRD data for naturally occurring minerals, collected under standardized conditions with Cu~K$\alpha$ radiation ($\lambda = 1.54184$~\AA). We accessed the RRUFF powder XRD dataset through the JARVIS figshare interface, which provides 1{,}362 entries. After deduplication by mineral name and filtering for valid chemical compositions (rejecting entries with unparseable formulas or HTML-encoded artifacts), 803 unique minerals remained. To focus on structures where lattice parameter comparison is most meaningful and to reduce the impact of supercell ambiguities, we further filtered to minerals with RRUFF-reported lattice parameters $a, b, c \leq 10$~\AA, yielding 276 minerals spanning all seven crystal systems: cubic~(50), orthorhombic~(44), monoclinic~(43), triclinic~(26), hexagonal~(26), tetragonal~(21), and rhombohedral~(7).
+
+Each RRUFF entry provides: (i)~a continuous powder XRD pattern (typically 8{,}501 data points spanning $20^\circ$--$95^\circ$ $2\theta$ at $0.02^\circ$ steps); (ii)~experimentally determined lattice parameters with uncertainties; (iii)~the crystal system classification; and (iv)~the chemical formula with site occupancies.
+
+To complement this experimental benchmark with a larger simulated-XRD test set, we also evaluated AGAPI-XRD on Alexandria PBE-hull structures~\cite{alexandria}. These entries provide DFT-relaxed reference lattice parameters and simulated powder XRD profiles, allowing a higher-throughput test of the same inverse-structure workflow under controlled reference conditions. The six Alexandria workflows processed 9{,}328--12{,}060 entries each, with 8{,}857--11{,}545 entries per workflow retaining complete reference and predicted lattice parameters. Unlike RRUFF, the Alexandria result files used here do not include crystal-system labels, so Alexandria crystal-system stratifications are intentionally left unspecified in the compiled results.
+
+
+\subsection{Lattice Parameter Comparison Protocol}\label{sec:cellmatch}
+
+
+
+Comparing predicted and reference lattice parameters requires careful treatment of cell-setting conventions. DFT databases typically store primitive cells, whereas RRUFF reports conventional cells. To account for this discrepancy, we implemented an automated cell-matching protocol.
+
+For each predicted structure, three cell variants are generated: the original cell, the primitive cell obtained via space-group analysis in JARVIS, and the conventional cell. For each of these variants, all six permutations of $(a,b,c)$ are evaluated with the corresponding reassignment of lattice angles. In standard crystallographic notation, $\alpha=\angle(\mathbf{b},\mathbf{c})$, $\beta=\angle(\mathbf{a},\mathbf{c})$, and $\gamma=\angle(\mathbf{a},\mathbf{b})$, so any permutation of the lattice vectors requires the angles to be remapped consistently. The optimal cell variant and axis permutation are then selected by minimizing a composite score that combines relative length errors, relative angle errors, and volume error. In total, this procedure evaluates $3 \times 6 = 18$ candidate cell representations per structure, substantially reducing systematic errors arising from cell-setting mismatches.
+
+Lattice parameter accuracy is assessed using several complementary metrics, since no single quantity fully captures agreement between predicted and experimental structures. The mean absolute error measures the average magnitude of the deviation between prediction and experiment,
+\begin{equation}
+\mathrm{MAE} = \frac{1}{N}\sum_{i=1}^{N}\left|y_i^{\mathrm{pred}} - y_i^{\mathrm{exp}}\right|.
+\end{equation}
+Because the absolute value weights all deviations linearly, MAE provides a direct and interpretable measure of the typical prediction error in the original units of the lattice parameter.
+
+To complement this, we also report the root mean square error,
+\begin{equation}
+\mathrm{RMSE} = \sqrt{\frac{1}{N}\sum_{i=1}^{N}\left(y_i^{\mathrm{pred}} - y_i^{\mathrm{exp}}\right)^2}.
+\end{equation}
+Unlike MAE, RMSE places greater emphasis on larger deviations because the errors are squared before averaging. As a result, it is more sensitive to outliers and is useful for identifying cases in which a small number of poor predictions disproportionately affect performance.
+
+We further evaluate agreement using the coefficient of determination,
+\begin{equation}
+R^2 = 1 - \frac{\sum\left(y_i^{\mathrm{pred}} - y_i^{\mathrm{exp}}\right)^2}
+                 {\sum\left(y_i^{\mathrm{exp}} - \bar{y}^{\mathrm{exp}}\right)^2}.
+\end{equation}
+This quantity measures how well the predicted values reproduce the variance of the experimental data. Values of $R^2$ closer to 1 indicate that the predictions more faithfully track the experimental trends.
+
+Because absolute error metrics alone do not indicate whether the model improves upon a trivial reference, we also compute a skill score,
+\begin{equation}
+\mathrm{Skill} = 1 - \frac{\mathrm{MAE}}{\mathrm{MAD}(\mathbf{y}^{\mathrm{exp}})},
+\end{equation}
+where
+\begin{equation}
+\mathrm{MAD} = \frac{1}{n}\sum_{i=1}^{n} \left| y_i - \bar{y} \right|
+\end{equation}
+is the mean absolute deviation of the experimental values. This score compares the model against a baseline that always predicts the mean of the experimental distribution. A skill score greater than zero indicates that the model outperforms this baseline, while a value of 1 corresponds to perfect predictions.
+
+In addition to pointwise metrics, we assess distribution-level agreement using the Jensen--Shannon divergence. This is useful because two models can have similar average errors while still producing noticeably different parameter histograms. Let $P(i)$ and $Q(i)$ denote the normalized histogram probabilities of the predicted and experimental values in bin $i$, and let
+\begin{equation}
+M(i)=\frac{1}{2}\bigl(P(i)+Q(i)\bigr)
+\end{equation}
+be the midpoint distribution. The Jensen--Shannon divergence is then defined as
+\begin{equation}
+\mathrm{JSD}(P \,\|\, Q)
+=
+\frac{1}{2} D_{\mathrm{KL}}(P \,\|\, M)
++
+\frac{1}{2} D_{\mathrm{KL}}(Q \,\|\, M),
+\end{equation}
+where the Kullback--Leibler divergence is
+\begin{equation}
+D_{\mathrm{KL}}(P \,\|\, Q)=\sum_i P(i)\log\!\left(\frac{P(i)}{Q(i)}\right).
+\end{equation}
+Smaller values of JSD indicate closer agreement between the predicted and experimental distributions, with $\mathrm{JSD}=0$ corresponding to identical distributions.
+
+To avoid numerical issues from zero-probability bins, we apply Laplace smoothing before normalization,
+\begin{equation}
+P(i)=\frac{n_i+\alpha}{\sum_{j=1}^{K}(n_j+\alpha)},
+\end{equation}
+with an analogous expression for $Q(i)$, where $n_i$ is the count in bin $i$, $K$ is the number of bins, and $\alpha>0$ is a small constant. This ensures that every bin has nonzero support and allows the divergence to be computed in a stable and consistent way.
+
+The AGAPI-XRD pipeline achieved 96.7\% structure identification coverage (267 of 276 minerals), with only 9 minerals unmatched (Table~\ref{tab:coverage}). Pattern matching against the combined JARVIS-DFT and COD databases succeeded for 84.1\% (232/276) of minerals, while DiffractGPT independently succeeded for 83.0--85.1\% (229--235/276 across replicate runs). Taken together, these two methods show substantial complementarity: pattern matching covers well-characterized stoichiometric compounds present in DFT or COD databases, whereas DiffractGPT fills gaps for complex minerals with non-standard stoichiometries, partial site occupancies, or hydrated phases.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.8\linewidth]{figures/combined_cryssys_match.png}
+\caption{\textbf{Aggregate pattern-matching match rate and crystal system histograms of predicted unit cells for three refinement methods.} {Sub-figure (a) shows the crystal system labels for RRUFF database structures after filtering (n=225). Sub-figure (b) shows the percentage of RRUFF structures that were matched and unmatched to existing structures in the JARVIS-DFT and COD databases using the pattern-matching procedure. Approximately 80\% of structures in the RRUFF database were matched to existing structures.}}
+\label{fig:crystal_system_histograms_plus_match_rate_pie}
+\end{figure}
+
+\begin{table}[h]
+\caption{Structure identification coverage on the RRUFF benchmark (276 minerals, $a,b,c \leq 10$~\AA). Pattern matching uses the combined JARVIS-DFT (${\sim}76{,}000$ entries) and COD (${\sim}400{,}000$ entries) databases. DiffractGPT uses a Mistral-7B transformer fine-tuned on JARVIS-DFT structure--XRD pairs. The ``Combined'' row reflects the best result from either method.}\label{tab:coverage}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Method & Count & Coverage (\%) \\
+\midrule
+Pattern matching (formula) & 216 & 78.3 \\
+Pattern matching (elements, fallback) & 16 & 5.8 \\
+Pattern matching (total) & 232 & 84.1 \\
+DiffractGPT & 229--235 & 83.0--85.1 \\
+Combined (any method) & 267 & 96.7 \\
+Unmatched & 9 & 3.3 \\
+\botrule
+\end{tabular}
+\end{table}
+
+The 9 unmatched minerals share common characteristics, namely highly complex or ambiguous chemical formulas containing site-mixing notation (e.g., Aeschynite-(Y): (Y,Ca,Th)(Ti,Nb)$_2$(O,OH)$_6$) and/or rare element combinations absent from both the databases and the training data. Among the matched minerals, the best structure was selected by pattern matching for 137 entries (63\% of matched), by DiffractGPT for 64 entries (29\%), and by element-based pattern matching for 16 entries (7\%). Moreover, integrating COD alongside JARVIS-DFT expanded pattern matching coverage; several minerals, including Carrollite CuCo$_2$S$_4$ and Aegirine NaFeSi$_2$O$_6$, matched multiple COD entries alongside JARVIS-DFT entries, thereby providing independent structural validation.
+
+The Alexandria PBE-hull runs provide a complementary large-scale simulated-XRD benchmark (Table~\ref{tab:alexandria_summary}). Across the six Alexandria workflows, AGAPI-XRD produced complete lattice comparisons for 8{,}857--11{,}545 structures per run. Combined pattern matching and DiffractGPT coverage was consistently high (94.9--96.2\%), while pattern matching alone covered 44.6--47.7\% of entries and DiffractGPT covered 93.3--94.8\%. Lattice-length MAEs were stable across refinement settings: $a$ and $b$ remained near 0.72--0.77~\AA{}, while $c$ was larger at 1.22--1.28~\AA{}. Approximately 77.5--78.2\% of Alexandria predictions had mean relative length error below 30\%, indicating that the pipeline behavior observed on RRUFF persists at substantially larger scale.
+
+\begin{table}[h]
+\caption{Alexandria PBE-hull simulated-XRD benchmark summary. Entries are the total rows processed by each workflow; $N_{\mathrm{lat}}$ is the number with complete reference and predicted lattice parameters. Coverage is the fraction with either pattern matching or DiffractGPT success. Rel.~$<30\%$ is the fraction of complete entries whose mean relative error across $a,b,c$ is below 30\%.}\label{tab:alexandria_summary}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+Workflow & Entries & $N_{\mathrm{lat}}$ & Coverage & MAE($a$) & MAE($b$) & MAE($c$) & Rel.~$<30\%$ \\
+\midrule
+None & 9{,}328 & 8{,}857 & 95.0\% & 0.724 & 0.731 & 1.221 & 77.7\% \\
+None + ALIGNN-FF & 10{,}939 & 10{,}445 & 95.5\% & 0.726 & 0.746 & 1.242 & 78.0\% \\
+BGMN & 11{,}364 & 10{,}805 & 95.1\% & 0.746 & 0.771 & 1.283 & 77.5\% \\
+BGMN + ALIGNN-FF & 12{,}060 & 11{,}545 & 95.7\% & 0.745 & 0.770 & 1.274 & 78.2\% \\
+GSAS-II & 10{,}299 & 9{,}770 & 94.9\% & 0.722 & 0.743 & 1.239 & 77.7\% \\
+GSAS-II + ALIGNN-FF & 11{,}419 & 10{,}989 & 96.2\% & 0.737 & 0.762 & 1.257 & 77.8\% \\
+\botrule
+\end{tabular}
+\end{table}
+
+
+\begin{figure}[t]
+\centering
+\makebox[\linewidth][c]{%
+\includegraphics[width=1.4\linewidth]
+{figures/distribution_filtered.png}}
+\caption{\textbf{Distribution analysis of actual versus predicted lattice parameters and actual versus predicted cell volumes across the RRUFF benchmark with the GSAS-II refinement method.} Histograms of cell volumes and all six lattice parameters are shown for the predicted crystal structures and the ground-truth crystal strucutres, with predicted corresponding to the pink distributions, ground-truth corresponding to the blue distributions, and overlap corresponding to the dark magenta regions. Kernel Density Estimate (KDE) curves corresponding to predicted and experimental histograms are shown for visualization of the histograms. For length-wise parameters, the DiffractGPT with GSAS-II refinement pipeline over-predicts smaller parameters and under-predicts larger parameters. For angular parameters, assuming that the distributions can be modeled as a sum of Gaussian curves, the pipeline seems to correctly estimate the center points of the Gaussian curves but overestimate the variance. For cell volumes, the pipeline over-predicts smaller parameters and under-predicts larger parameters, which is expected given the length-wise distributions. Moreover, Jenson-Shannon Divergence (JSD) is shown to numerically quantify the divergence between the predicted and ground-truth distributions.
+}
+\label{fig:error_histogram}
+\end{figure}
+
+After filtering to 217 entries with complete lattice parameter data, the overall accuracy metrics are summarized in Table~\ref{tab:overall_metrics}. In general, lattice lengths $a$, $b$, and $c$ exhibit MAEs of approximately 1.1~\AA{} with positive skill scores (+0.21 to +0.35), indicating that the pipeline meaningfully outperforms the trivial baseline of predicting the population mean. At the same time, the median absolute errors (0.40--0.46~\AA) are substantially smaller than the MAEs, which shows that most predictions are reasonably accurate, with a tail of poorly matched entries inflating the mean. Cell volume predictions show the highest skill score (+0.38) with $R^2 = 0.26$. By contrast, the negative $R^2$ values for the angles do not imply random predictions; rather, they reflect the narrow distribution of experimental angles, since most minerals have angles near $90^\circ$ or $120^\circ$, so even a modest systematic offset yields a disproportionately large $R^2$ penalty. Meanwhile, Jensen--Shannon divergence values range from 0.18 ($c$) to 0.25 ($b$, $\alpha$), indicating moderate distributional overlap (Figure~\ref{fig:distributions}).
+
+\begin{figure}[t]
+\centering
+\makebox[\textwidth][c]{%
+  \includegraphics[width=1.3\linewidth]{figures/refinement_mae_all12_dirs.png}
+}
+\caption{\textbf{Mean Absolute Error (MAE) for six lattice parameters across RRUFF and Alexandria workflows.} Predicted AGAPI-XRD lattice parameters are compared with the corresponding RRUFF experimental or Alexandria DFT reference values for no refinement, BGMN, GSAS-II, and optional ALIGNN-FF relaxation. Lengthwise lattice parameters are shown with warm colors, and angular lattice parameters are shown with cool colors.}
+\label{fig:refinement_mae_all6}
+\end{figure}
+
+\begin{table}[h]
+\caption{Overall lattice parameter accuracy on the RRUFF benchmark ($N = 217$, filtered to entries with RRUFF $a,b,c < 10$~\AA{} and valid predictions). MAE~=~mean absolute error, RMSE~=~root mean square error, $R^2$~=~coefficient of determination, Med.~$|\Delta|$~=~median absolute error, MAD(exp)~=~mean absolute deviation of experimental values, Skill~=~$1 - \mathrm{MAE}/\mathrm{MAD}(\mathrm{exp})$, JSD~=~Jensen--Shannon divergence between experimental and predicted distributions.}\label{tab:overall_metrics}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+Parameter & MAE & RMSE & $R^2$ & Med.\ $|\Delta|$ & MAD(exp) & Skill & JSD \\
+\midrule
+$a$ (\AA) & 1.07 & 1.73 & 0.19 & 0.46 & 1.64 & +0.35 & 0.23 \\
+$b$ (\AA) & 1.16 & 1.99 & $-$0.06 & 0.40 & 1.65 & +0.30 & 0.25 \\
+$c$ (\AA) & 1.20 & 2.57 & $-$0.98 & 0.40 & 1.53 & +0.21 & 0.18 \\
+$\alpha$ ($^\circ$) & 3.60 & 9.60 & $-$0.77 & 0.00 & 2.38 & $-$0.51 & 0.25 \\
+$\beta$ ($^\circ$) & 6.44 & 12.84 & $-$0.39 & 0.00 & 6.83 & +0.06 & 0.20 \\
+$\gamma$ ($^\circ$) & 7.33 & 15.59 & $-$0.36 & 0.00 & 7.86 & +0.07 & 0.25 \\
+$V$ (\AA$^3$) & 96.0 & 170.7 & 0.26 & 34.1 & 155.4 & +0.38 & 0.19 \\
+\botrule
+\end{tabular}
+\end{table}
+
+A particularly important result is the sharp performance difference between the two identification methods, as shown in Table~\ref{tab:method_breakdown}. For pattern-matched structures, lattice length MAEs are 0.73--0.81~\AA{} with consistently positive skill scores (+0.51 to +0.55), and the volume skill reaches +0.62. These remaining errors likely arise from a combination of systematic DFT overestimation of lattice constants, typically 1--3\% with OptB88vdW~\cite{jarvis2020}, residual cell transformation errors, and axis assignment ambiguity. DiffractGPT, in contrast, shows approximately doubled MAEs (1.72--2.19~\AA) with skill scores near zero. Nevertheless, its primary value lies in extending coverage to the 64 minerals (29\%) that could not be identified by database search.
+
+\begin{table}[h]
+\caption{Lattice parameter MAE and Skill stratified by identification method. Pattern matching (PM) draws structures from the JARVIS-DFT and COD databases. DiffractGPT (DG) generates structures de novo from XRD peaks and formula. PM~(elements) is the fallback compositional search triggered when exact formula matching fails. Skill values above zero indicate the method outperforms predicting the experimental population mean.}\label{tab:method_breakdown}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+& \multicolumn{2}{c}{PM ($n=137$)} & \multicolumn{2}{c}{DG ($n=64$)} & \multicolumn{2}{c}{PM elem.\ ($n=16$)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Param.\ & MAE & Skill & MAE & Skill & MAE & Skill \\
+\midrule
+$a$ (\AA) & 0.74 & +0.55 & 1.72 & $-$0.05 & 1.30 & +0.24 \\
+$b$ (\AA) & 0.81 & +0.51 & 1.92 & $-$0.16 & 1.10 & +0.35 \\
+$c$ (\AA) & 0.73 & +0.52 & 2.19 & $-$0.44 & 1.94 & $-$0.27 \\
+$V$ (\AA$^3$) & 59.5 & +0.62 & 173.2 & $-$0.11 & 126.9 & +0.19 \\
+\botrule
+\end{tabular}
+\end{table}
+
+Performance also varies substantially by crystal system (Table~\ref{tab:crystal_system}). Orthorhombic and monoclinic systems show the best performance, with skill scores exceeding +0.4 for lattice lengths. Hexagonal systems also perform well, whereas tetragonal and cubic systems are somewhat more modest. On the other hand, triclinic systems show the poorest performance, with negative skill for all parameters, which is consistent with the greater difficulty of recovering structures that contain six independent lattice parameters from one-dimensional powder diffraction data. Rhombohedral systems ($n = 7$) likewise show poor length accuracy and appear especially sensitive to cell-setting conversion difficulties.
+
+\begin{table}[h]
+\caption{Lattice parameter accuracy stratified by RRUFF crystal system classification. $n$~=~number of minerals in each system within the filtered benchmark. MAE and Skill are shown for lattice parameter $a$ (representative of lengths) and unit cell volume $V$. Orthorhombic and monoclinic systems show the best length accuracy, while triclinic and rhombohedral systems show the poorest, consistent with the number of independent lattice parameters that must be determined from one-dimensional powder diffraction data.}\label{tab:crystal_system}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Crystal System & $n$ & MAE($a$) (\AA) & Skill($a$) & MAE($V$) (\AA$^3$) & Skill($V$) \\
+\midrule
+Cubic & 50 & 1.30 & +0.24 & 126.9 & +0.50 \\
+Orthorhombic & 44 & 0.91 & +0.43 & 60.8 & +0.45 \\
+Monoclinic & 43 & 0.74 & +0.58 & 79.0 & +0.18 \\
+Hexagonal & 26 & 0.98 & +0.51 & 89.1 & +0.52 \\
+Tetragonal & 21 & 1.15 & +0.20 & 101.6 & +0.23 \\
+Triclinic & 26 & 1.23 & $-$0.43 & 121.3 & $-$0.22 \\
+Rhombohedral & 7 & 2.02 & $-$0.47 & 116.0 & +0.37 \\
+\botrule
+\end{tabular}
+\end{table}
+
+The elemental composition analysis further supports the view that lattice recovery is governed primarily by geometric rather than chemical constraints. Specifically, the distribution of prediction errors across the periodic table (Figure~\ref{fig:periodic_errors}) is broadly uniform across most elements. Where elevated errors do appear, they are concentrated mainly among sparsely represented elements, suggesting that the dominant limitation is data scarcity rather than chemistry-specific failure modes.
+
+Finally, the distributions of relative prediction errors for $a$, $b$, and $c$ (Figure~\ref{fig:error_histogram}) exhibit a characteristic bimodal structure, with one peak at 0--10\% relative error corresponding primarily to pattern-matched structures and a second peak at 30--40\% corresponding largely to DiffractGPT structures. Consistent with this interpretation, approximately 40\% of predictions achieve less than 10\% relative error, while 65\% fall within 30\% (Figure~\ref{fig:cumulative_errors})..
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.7\linewidth]{figures/atomgpt_dot_org_xrd.png}
+\caption{\textbf{Web-based AGAPI-XRD interface on AtomGPT.org for automated crystal structure identification from powder XRD data.} \textbf{(a)} Input panel showing submission of an experimental XRD spectrum with a chemical formula or elemental composition, along with user-selectable options for pattern matching, DiffractGPT-based structure generation, Rietveld refinement, and downstream materials-property analysis. \textbf{(b)} Ranked candidate structures returned by the pipeline with match scores and key structural descriptors. \textbf{(c)} Visualization panel displaying the selected crystal structure, its structural representation, and the overlay between input and predicted diffraction patterns. The figure highlights the integrated, end-to-end design of AGAPI-XRD for accessible automated XRD analysis.}
+\label{fig:atomgpt_dot_ord_xrd}
+\end{figure}
+
+
+The most significant finding is the strong complementarity between database-driven pattern matching and generative AI. In particular, pattern matching provides high-accuracy identification (skill $+0.5$ to $+0.6$) for the 84\% of minerals with matching database entries, while DiffractGPT extends coverage to 97\% by generating approximate structures for complex minerals. Thus, this two-tier architecture---in which reliable database search is prioritized and AI generation serves as a fallback---maximizes both accuracy and coverage. In addition, the element-based fallback provides an intermediate tier, successfully identifying 16 additional minerals.
+
+At the same time, several systematic error sources contribute to the observed MAEs. First, systematic bias arises from the choice of exchange-correlation functional in the density functional theory calculations. Specifically, the JARVIS-DFT database uses the OptB88vdW functional~\cite{jarvis2020}, which systematically overestimates lattice constants by 1--3\%. Second, cell setting mismatch remains an important source of error. Although the automated 18-candidate cell-matching protocol (Section~\ref{sec:cellmatch}) substantially reduces this issue, some primitive-to-conventional transformations remain imperfect, particularly for rhombohedral and body-centered structures. Third, DiffractGPT exhibits a clear symmetry bias. More specifically, the model shows a marked preference for high-symmetry structures, particularly hexagonal $P6_3/mmc$ and cubic $Fm\bar{3}m$, which is visible as clustering of predicted $\beta$ and $\gamma$ at $90^\circ$ and $120^\circ$ in Figure~\ref{fig:parity}. This likely reflects the overrepresentation of high-symmetry structures in the training data. Finally, inverse problem ambiguity is fundamental to the task itself. Because powder XRD data is inherently one-dimensional, the mapping from diffraction pattern to crystal structure is not one-to-one~\cite{patterson1944}.
+
+Moreover, across the three experimental RRUFF configurations (no refinement, BGMN, GSAS-II), the overall metrics showed only modest variation (MAE($a$) = 1.04--1.08~\AA). The larger Alexandria benchmark showed the same trend: MAE($a$) remained in a narrow 0.72--0.75~\AA{} range across no-refinement, BGMN, GSAS-II, and ALIGNN-FF workflows. In other words, for pattern-matched structures that are already close to the reference, refinement provides only marginal improvement. By contrast, for DiffractGPT structures with incorrect symmetry, refinement tends to converge to local $R_{\mathrm{wp}}$ minima. Therefore, the primary value of refinement lies less in dramatically improving lattice accuracy and more in providing quantitative figures of merit, as well as enabling extraction of refined atomic positions and thermal parameters.
+
+More broadly, the AGAPI-XRD pipeline represents the first end-to-end automated benchmark of combined database search and generative AI for crystal structure identification from powder XRD, evaluated against a large experimental mineral database. By comparison, previous approaches focused on individual components~\cite{park2017, lee2020xrd, vecsei2019}. Likewise, DiffractGPT~\cite{diffractgpt2025} was evaluated primarily on simulated data. Accordingly, our benchmark provides the first quantitative assessment against experimentally measured patterns.
+
+Nevertheless, several limitations remain. The RRUFF benchmark is biased toward common minerals, so performance on novel synthetic materials may differ. The Alexandria benchmark broadens the chemical and structural scale of the evaluation, but it is based on simulated XRD profiles and DFT-relaxed reference structures rather than experimental measurements. Similarly, the cell-matching protocol does not guarantee correct settings for all space groups, and DiffractGPT was trained exclusively on JARVIS-DFT data. Looking ahead, several directions could improve the framework further, including: (i)~fine-tuning DiffractGPT on lower-symmetry structures; (ii)~jointly optimizing cell-matching and pattern similarity scores; (iii)~active learning from refinement results; and (iv)~extension to multiphase identification and amorphous quantification.
+
+
+\section{Methods}\label{sec:methods}                                                                                                                                            
+                                                                                                                                                                                  
+  DiffractGPT is a generative pretrained transformer (GPT) that predicts crystal                                                                                                  
+  structures directly from powder XRD peak data. Following the architecture of                                                                                                    
+  decoder-only transformers~\cite{vaswani2017attention}, the model processes an                                                                                                   
+  input sequence of tokenized peak positions and relative intensities alongside a                                                                                                 
+  chemical formula token. The core operation is scaled dot-product self-attention,                                                                                                
+  \begin{equation}                                                                                                                                                                
+    \mathrm{Attention}(Q,K,V) =                                                                                                                                                   
+      \mathrm{softmax}\!\left(\frac{QK^{\!\top}}{\sqrt{d_k}}\right)V,                                                                                                             
+  \end{equation}                                                                                                                                                                  
+  where $Q$, $K$, and $V$ are learned linear projections of the input embeddings                                                                                                  
+  and $d_k$ is the key dimension. Multi-head attention concatenates $h$ such heads                                                                                                
+  to capture dependencies across different representation subspaces. A fine-tuned                                                                                                 
+  Mistral-7B~\cite{diffractgpt2025} backbone maps this peak-and-formula sequence                                                                                                  
+  to a structured output containing lattice parameters, space group, and fractional                                                                                               
+  atomic coordinates.                                                                                                                                                             
+                                                                                                                                                                                  
+  To complement generative prediction, ALIGNN-FF~\cite{choudhary2023unified}                                                                                                      
+  provides optional pre-refinement structural relaxation. ALIGNN constructs two
+  message-passing graphs from a crystal structure: an atomic graph $\mathcal{G}$                                                                                                  
+  with nodes representing atoms and edges representing bonds within a cutoff                                                                                                      
+  radius, and a line graph $\mathcal{L}(\mathcal{G})$ whose nodes correspond to                                                                                                   
+  bonds and whose edges encode bond angles. Node and edge features are updated by                                                                                                 
+  interleaved message-passing over both graphs,                                                                                                                                   
+  \begin{equation}                                                                                                                                                                
+    \mathbf{h}_i^{(l+1)} = \phi\!\left(\mathbf{h}_i^{(l)},\,                                                                                                                      
+      \sum_{j \in \mathcal{N}(i)} \psi\!\left(\mathbf{h}_i^{(l)},                                                                                                                 
+        \mathbf{e}_{ij}^{(l)}, \mathbf{h}_j^{(l)}\right)\right),                                                                                                                  
+  \end{equation}                                                                                                                                                                  
+  where $\mathbf{h}_i^{(l)}$ and $\mathbf{e}_{ij}^{(l)}$ are node and edge                                                                                                        
+  embeddings at layer $l$, and $\phi$, $\psi$ are learnable functions. ALIGNN-FF                                                                                                  
+  was trained on approximately 4.9~million DFT energy and force evaluations from                                                                                                  
+  the JARVIS-DFT database and is used here to reduce geometric artifacts in                                                                                                       
+  AI-generated structures prior to Rietveld refinement.                                                                                                                           
+                                                                                                                                                                                  
+  Two classical refinement engines are supported in the pipeline. GSAS-II~\cite{toby2013}                                                                                         
+  is an open-source, full-featured crystallographic software suite that implements
+  full-pattern Rietveld refinement via a Python scripting interface; it is widely                                                                                                 
+  used in the community and provides comprehensive control over background                                                                                                        
+  modeling, peak profiles, and structural parameters. BGMN~\cite{bgmn1998} is an                                                                                                  
+  alternative Rietveld engine accessed through the \texttt{dara.refine} package,                                                                                                  
+  designed for fast, automated multi-phase refinement; its inclusion enables                                                                                                      
+  cross-validation of refinement results between two independent implementations.                                                                                                 
+                                                                                                                                                                                  
+  The RRUFF Project~\cite{rruff2015} provides the experimental benchmark used here.                                                                                               
+  RRUFF powder patterns are collected on natural mineral specimens under standardized                                                                                             
+  conditions using Cu~K$\alpha$ radiation ($\lambda = 1.54184$~\AA), and each                                                                                                     
+  entry reports a continuous intensity profile spanning approximately                                                                                                             
+  $20^\circ$--$95^\circ$ $2\theta$ along with experimentally determined lattice                                                                                                   
+  parameters and the mineral's chemical formula; crucially, atomic coordinates are                                                                                                
+  generally not provided, so the benchmark tests lattice-level rather than                                                                                                        
+  full-structural agreement.                                                                                                                                                      
+                                                                                                                                                                                  
+  The Alexandria PBE-hull dataset~\cite{alexandria} comprises approximately                                                                                                       
+  5~million crystal structures optimized at the PBE level of DFT across the full                                                                                                  
+  compositional space. For the prototype database and simulated benchmark used in                                                                                                 
+  this work, only structures with convex-hull energy $E_{\mathrm{hull}} = 0$~eV/atom                                                                                              
+  are retained, on the grounds that thermodynamically stable compositions are the                                                                                                 
+  most likely to be encountered experimentally. This hull-filtering reduces the                                                                                                   
+  Alexandria contribution to roughly 117,000 entries while ensuring that structures                                                                                               
+  used as substitution templates and simulated-XRD references correspond to                                                                                                       
+  realistically synthesizable phases. For the Alexandria benchmark, the DFT-relaxed                                                                                               
+  lattice parameters serve as the reference values and the XRD patterns are                                                                                                       
+  simulated on the same fixed grid used by the AGAPI-XRD request pipeline.                                                                                                        
+                                                                                                                                                                                  
+  The AGAPI platform exposes XRD analysis through a RESTful endpoint                                                                                                              
+  (\texttt{POST /xrd/analyze\_with\_refinement}) that accepts a JSON payload                                                                                                      
+  containing the digitized intensity profile, peak list, and chemical formula or                                                                                                  
+  elemental composition. Optional request fields select the pattern-matching                                                                                                      
+  database (JARVIS-DFT, COD, or both), enable DiffractGPT generation, choose the                                                                                                  
+  Rietveld engine (GSAS-II or BGMN), activate ALIGNN-FF relaxation, and request                                                                                                   
+  downstream property predictions from ALIGNN and SlaKoNet. The endpoint returns                                                                                                  
+  a ranked list of candidate structures as POSCAR files together with cosine                                                                                                      
+  similarity scores, $R_{\mathrm{wp}}$ values where refinement was performed,
+  and any requested property predictions.                                                                                                                                         
+                                                                                                                                                                                  
+  The Trillion-XRD dataset is generated by the \texttt{trillion3.py} pipeline,                                                                                                    
+  which proceeds through four stages. First, a prototype database is assembled by                                                                                                 
+  scanning all entries in JARVIS-DFT (${\sim}76{,}000$), COD (${\sim}237{,}000$),                                                                                                 
+  and Alexandria PBE hull (${\sim}117{,}000$), extracting the composition prototype                                                                                               
+  (e.g., \texttt{AB}, \texttt{AB\textsubscript{2}}, \texttt{ABC\textsubscript{3}})                                                                                                
+  and space group for each structure; this yields 2,411 unique prototypes spanning                                                                                                
+  8,408 prototype--space-group combinations, cached to disk for reuse. Second,                                                                                                    
+  hypothetical structures are generated by enumerating all ordered permutations of                                                                                                
+  the 94-element pool over the $n_{\mathrm{sites}}$ distinct Wyckoff site types of                                                                                                
+  each prototype, substituting the selected elements into the template lattice and                                                                                                
+  fractional coordinates while tagging each structure with a charge-neutrality                                                                                                    
+  flag (without filtering); binary arities alone contribute over 7~million                                                                                                        
+  structures across 117 prototypes. Third, powder XRD patterns are computed for                                                                                                   
+  every generated structure using the JARVIS kinematic diffraction module on a                                                                                                    
+  fixed $2\theta$ grid ($0^\circ$--$90^\circ$, step $0.18^\circ$, 500 points),                                                                                                    
+  with peaks broadened by a Gaussian of $\sigma = 0.10^\circ$ and intensities                                                                                                     
+  normalized to 0--100; this step is parallelized across all available CPU cores                                                                                                  
+  via Python multiprocessing. Finally, structures and patterns are serialized to                                                                                                  
+  LMDB shards, converted to Parquet with zstd compression, and uploaded to the                                                                                                    
+  HuggingFace dataset repository \texttt{knc6/trillion-xrd}; the pipeline is                                                                                                      
+  resume-safe, skipping shards already present on the hub, and a streaming mode                                                                                                   
+  bounds local disk usage to approximately one prototype at a time to support                                                                                                     
+  trillion-scale generation on constrained hardware.
+
+
+%% =========================================================================
+%%  CONCLUSION
+%% =========================================================================
+
+
+\section{Conclusion}\label{sec:conclusion}
+
+We have presented AGAPI-XRD, a hybrid framework that combines database-driven pattern matching, DiffractGPT generative structure prediction, and automated Rietveld refinement for X-ray diffraction analysis. Benchmarked on 276 minerals from the experimental RRUFF database, the pipeline achieved 96.7\% structure identification coverage, with lattice-parameter mean absolute errors of approximately 1.1~\AA{} for unit-cell lengths and positive skill scores for lattice lengths and volume. On the larger Alexandria PBE-hull simulated-XRD benchmark, the combined workflow achieved 94.9--96.2\% coverage across six refinement and ALIGNN-FF settings, with stable lattice-length MAEs across workflows. The results show that the strongest performance comes from the complementarity of the framework components: pattern matching provides the highest structural accuracy when suitable database entries exist, while DiffractGPT substantially expands coverage to complex minerals and DFT reference structures that are absent from existing reference sets. Across RRUFF crystal systems, performance is strongest for orthorhombic and monoclinic materials and weakest for triclinic and rhombohedral materials, reflecting the greater ambiguity of recovering low-symmetry structures from one-dimensional powder diffraction data. Although automated refinement provides only modest improvements in aggregate lattice metrics, it remains valuable for improving structural consistency and supplying quantitative figures of merit for candidate solutions. Taken together, these results establish AGAPI-XRD as a practical and accessible step toward automated, end-to-end crystal structure determination from powder XRD data. The pipeline is freely accessible at \url{https://atomgpt.org/xrd}.
+
+%% =========================================================================
+%%  DECLARATIONS
+%% =========================================================================
+\section*{Data Availability}
+
+All code, benchmark scripts, and analysis notebooks are available at \url{https://github.com/atomgptlab}. The RRUFF powder XRD data is accessible through the JARVIS figshare interface, and the Alexandria-derived simulated-XRD benchmark is generated from the Alexandria PBE-hull structures used in this work. The AGAPI-XRD API is publicly available at \url{https://atomgpt.org/xrd}.
+
+\section*{Acknowledgements}
+
+K.C.\ acknowledges support from the Johns Hopkins University Discovery Award and the National Institute of Standards and Technology.
+
+\section*{Author Contributions}
+
+K.C.\ conceived and supervised the project. J.E.\ and C.R.C.\ implemented the benchmark pipeline and analysis. J.L.\ contributed to DiffractGPT model integration. F.A.\ contributed to Rietveld refinement methodology. All authors discussed results and contributed to manuscript preparation.
+
+\section*{Competing Interests}
+
+The authors declare no competing interests.
+
+\section*{Disclaimer}
+
+The views expressed in this article are those of the authors and do not reflect the official policy or position of the U.S. Naval Academy, Department of the Navy, the Department of Defense, or the U.S. Government.
+
+
+
+
+
+% \begin{figure}[p]
+% \centering
+% \fbox{\parbox{0.55\textwidth}{\vspace{5cm}\centering\large\sffamily\color{gray}
+% \textbf{Figure~3 Placeholder}\\[6pt]
+% Cumulative Error Distribution\\[4pt]
+% \normalsize\texttt{figures/Fig\_Cumulative\_Errors.png}
+% \vspace{5cm}}}
+% \caption{\textbf{Cumulative distribution of relative lattice parameter errors across the RRUFF benchmark.} The curve shows the fraction of predictions achieving less than a given relative error threshold. Approximately 40\% of predictions achieve less than 10\% relative error (primarily pattern-matched structures from JARVIS-DFT and COD), and 65\% fall within 30\% relative error. The steep initial rise reflects the high-accuracy pattern-matching subset, while the gradual tail corresponds to DiffractGPT-generated structures. The inflection point near 15--20\% roughly delineates the boundary between the two accuracy regimes.}
+% \label{fig:cumulative_errors}
+% \end{figure}
+
+
+% \begin{figure}[p]
+% \centering
+% \fbox{\parbox{0.85\textwidth}{\vspace{5cm}\centering\large\sffamily\color{gray}
+% \textbf{Figure~4 Placeholder}\\[6pt]
+% Elemental Composition Heatmap\\[4pt]
+% \normalsize\texttt{figures/Fig\_Element\_Frequencies.png}
+% \vspace{5cm}}}
+% \caption{\textbf{Elemental composition of the RRUFF benchmark dataset.} The periodic table heatmap shows the normalized frequency of elements appearing in the 276 benchmark minerals, with colors scaled logarithmically to highlight both dominant and sparsely represented species. The dataset exhibits an expected bias toward common mineral-forming elements---notably oxygen, silicon, calcium, iron, aluminum, sodium, magnesium, and sulfur---reflecting the natural abundance distribution of the Earth's crust. The JARVIS-DFT training database features similar elemental emphases but with broader periodic table coverage. This non-uniform chemical distribution provides a natural test of the model's ability to generalize from diffraction patterns across varying levels of elemental representation.}
+% \label{fig:element_freq}
+% \end{figure}
+
+% \begin{figure}[p]
+% \centering
+% \fbox{\parbox{0.85\textwidth}{\vspace{7cm}\centering\large\sffamily\color{gray}
+% \textbf{Figure~5 Placeholder}\\[6pt]
+% Parity Plots (7 panels, color-coded by method)\\[4pt]
+% \normalsize\texttt{figures/Fig\_Parameter\_Comparison.png}
+% \vspace{7cm}}}
+% \caption{\textbf{Parity plots comparing RRUFF experimental and AGAPI-XRD predicted lattice parameters.} Seven panels show $a$, $b$, $c$, $\alpha$, $\beta$, $\gamma$, and volume, with each point representing one mineral. Points are color-coded by identification method: red (pattern matching, $n = 137$), blue (DiffractGPT, $n = 64$), and green (element-based pattern matching, $n = 16$). The dashed diagonal indicates perfect agreement. Pattern-matched points (red) cluster tightly along the diagonal for lattice lengths and volume, reflecting the structural accuracy of JARVIS-DFT and COD entries. DiffractGPT points (blue) show larger scatter, particularly for angles where predicted values cluster at $90^\circ$ and $120^\circ$ regardless of the experimental value, reflecting the model's bias toward high-symmetry cells. For lattice lengths, the pattern-matching MAE (0.73--0.81~\AA) is approximately half that of DiffractGPT (1.72--2.19~\AA). MAE and $R^2$ values are annotated for each panel.}
+% \label{fig:parity}
+% \end{figure}
+
+% \begin{figure}[p]
+% \centering
+% \fbox{\parbox{0.85\textwidth}{\vspace{5cm}\centering\large\sffamily\color{gray}
+% \textbf{Figure~6 Placeholder}\\[6pt]
+% Distribution Comparison (histograms + KDE)\\[4pt]
+% \normalsize\texttt{figures/distribution\_filtered.png}
+% \vspace{5cm}}}
+% \caption{\textbf{Overlaid distributions of RRUFF experimental and AGAPI-XRD predicted lattice parameters.} Each panel shows normalized histograms and kernel density estimates (KDE) for the experimental (blue) and predicted (pink) distributions of $a$, $b$, $c$, $\alpha$, $\beta$, $\gamma$, and volume. Jensen--Shannon divergence (JSD) values are annotated for each parameter. Lattice lengths show moderate distributional overlap (JSD~=~0.18--0.25), with predicted distributions broadly capturing the shape of experimental distributions but shifted by DFT systematic bias. Angle distributions show the most pronounced differences: experimental $\alpha$ and $\gamma$ concentrate near $90^\circ$ with a secondary peak at $120^\circ$ for hexagonal systems, while predicted distributions show additional density at non-standard angles due to cell-setting mismatches.}
+% \label{fig:distributions}
+% \end{figure}
+
+% \begin{figure}[p]
+% \centering
+% \fbox{\parbox{0.85\textwidth}{\vspace{5cm}\centering\large\sffamily\color{gray}
+% \textbf{Figure~7 Placeholder}\\[6pt]
+% Periodic Table Error Map\\[4pt]
+% \normalsize\texttt{figures/Fig\_Prediction\_Errors\_Periodic.png}
+% \vspace{5cm}}}
+% \caption{\textbf{Mean relative prediction error mapped onto the periodic table.} Elements are colored according to the average lattice parameter prediction error for RRUFF minerals containing that element; grey cells represent elements not present in the benchmark. Prediction errors are broadly uniform across most elements (typically 25--45\% range), indicating that lattice recovery is governed primarily by geometric constraints rather than element-specific chemical properties. This is consistent with the pipeline's architecture: chemical formula is provided as explicit input, leaving geometric inference as the primary task. Elevated errors ($>$50\%) are observed primarily for sparsely represented elements (rare earths, platinum-group, actinides), suggesting performance limitations arise from data scarcity rather than intrinsic chemical complexity.}
+% \label{fig:periodic_errors}
+% \end{figure}
+
+% \begin{figure}[p]
+% \centering
+% \fbox{\parbox{0.85\textwidth}{\vspace{5cm}\centering\large\sffamily\color{gray}
+% \textbf{Figure~8 Placeholder}\\[6pt]
+% Error by Method Box Plots\\[4pt]
+% \normalsize\texttt{figures/error\_by\_method\_filtered.png}
+% \vspace{5cm}}}
+% \caption{\textbf{Distribution of absolute lattice parameter errors stratified by identification method.} Box plots show the distribution of $|\Delta a|$, $|\Delta b|$, $|\Delta c|$, $|\Delta\alpha|$, $|\Delta\beta|$, $|\Delta\gamma|$, and $|\Delta V|$ for pattern matching (PM, red), DiffractGPT (DG, blue), and element-based pattern matching (PM~elem, green). Pattern matching consistently shows the tightest error distributions with median errors near zero for lattice lengths, while DiffractGPT shows wider distributions with higher medians. Angular errors are larger for DiffractGPT due to the model's tendency to generate high-symmetry cells. Element-based matching shows intermediate behavior, reflecting the compositional rather than structural nature of the search.}
+% \label{fig:error_by_method}
+% \end{figure}
+
+% \begin{figure}[p]
+% \centering
+% \fbox{\parbox{0.85\textwidth}{\vspace{5cm}\centering\large\sffamily\color{gray}
+% \textbf{Figure~9 Placeholder}\\[6pt]
+% Error by Crystal System Box Plots\\[4pt]
+% \normalsize\texttt{figures/error\_by\_crystal\_filtered.png}
+% \vspace{5cm}}}
+% \caption{\textbf{Distribution of absolute lattice parameter errors stratified by crystal system.} Box plots show error distributions for cubic ($n = 50$), orthorhombic ($n = 44$), monoclinic ($n = 43$), triclinic ($n = 26$), hexagonal ($n = 26$), tetragonal ($n = 21$), and rhombohedral ($n = 7$) systems. Orthorhombic and monoclinic systems show the tightest error distributions for lattice lengths, consistent with their high skill scores (Table~\ref{tab:crystal_system}). Triclinic systems show the widest distributions, reflecting the challenge of determining six independent parameters from one-dimensional data. Rhombohedral systems show systematic angular offsets exceeding $30^\circ$ due to cell-setting conversion difficulties. Cubic systems show good length accuracy but occasional large $\gamma$ errors from hexagonal--cubic confusion.}
+% \label{fig:error_by_crystal}
+% \end{figure}
+
+
+
+%% =========================================================================
+%%  BIBLIOGRAPHY
+%% =========================================================================
+
+\bibliography{references}
+\bibliographystyle{sn-mathphys-num}
+
+\end{document}
+

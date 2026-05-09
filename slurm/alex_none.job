@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=rruff_bmgn
+#SBATCH --job-name=alex_none
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --ntasks-per-node=1
@@ -8,20 +8,6 @@
 source ~/.bashrc
 eval "$(conda shell.bash hook)"
 conda activate jarvis
-module load cuda/11.8
-nvidia-smi
-
-export PRINT_STRUCTURES=1
-export AtomGPT_COMPILE_DISABLE=1
-export PYTHONUNBUFFERED=1
-export TQDM_MININTERVAL=0.1
-export TQDM_MINITERS=1
-export HF_HOME=/scratch/kchoudh2/$USER/hf_home
-export HUGGINGFACE_HUB_CACHE=/scratch/kchoudh2/$USER/hf_home/hub
-export TRANSFORMERS_CACHE=/scratch/kchoudh2/$USER/hf_home/transformers
-export HF_DATASETS_CACHE=/scratch/kchoudh2/$USER/hf_home/datasets
-export ATOMGPT_PATH=~/repositories/atomgpt_jhu
-
 echo "===== BEGIN BATCH SCRIPT: $0 ==="
 sed -n '1,99999p' "$0"
 echo "===== END BATCH SCRIPT ========="
@@ -46,5 +32,5 @@ if [[ ! -f key.txt ]]; then
 fi
 API_KEY="$(tr -d '\r\n' < key.txt)"
 
-srun --unbuffered mkdir -p runs/rruff_bmgn && cd runs/rruff_bmgn && python ../../src/agapi_xrd_scripts/rruff_xrd_analysis.py --api-key "$API_KEY" --run-refinement --refinement-engine bmgn --output-csv rruff_bmgn_results.csv --output-poscars rruff_bmgn_poscars.json --max-abc 10
+srun --unbuffered mkdir -p runs/alex_no_refinement && cd runs/alex_no_refinement && python ../../scripts/benchmark/alex_xrd_analysis.py --api-key "$API_KEY" --output-csv alex_no_refinement_results.csv --output-poscars alex_no_refinement_poscars.json --max-abc 10 --dataset-path ../../xrd_datasets/alex_pbe_hull
 echo "===== JOB FINISHED ============="

@@ -38,7 +38,7 @@ NUM_WORKERS="${SLURM_CPUS_PER_TASK:-16}"
 
 mkdir -p "$OUTPUT_DIR"
 
-srun --unbuffered python src/agapi_xrd_scripts/xrd_simulate_alex_pbe_hull.py \
+srun --unbuffered python scripts/benchmark/xrd_simulate_alex_pbe_hull.py \
     --dataset "$DATASET" \
     --output-dir "$OUTPUT_DIR" \
     --num-workers "$NUM_WORKERS" \

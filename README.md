@@ -16,40 +16,44 @@ The combined pipeline is exposed through the AGAPI interface at `https://atomgpt
 
 ```
 agapi_xrd_paper/
-├── src/
-│   ├── agapi_xrd_scripts/        # Benchmark drivers and result compilation
-│   │   ├── rruff_xrd_analysis.py
-│   │   ├── analyse_filtered_rruff.py  (symlink → plotting_scripts/)
-│   │   ├── compile_agapi_replication_metrics.py
-│   │   ├── compile_results.sh
-│   │   └── xrd_simulate_alex_pbe_hull.py
-│   ├── slurm_scripts/            # HPC job submission files
-│   │   ├── xrd_pipeline_none.job
-│   │   ├── xrd_pipeline_none_alignnff.job
-│   │   ├── xrd_pipeline_gsas2.job
-│   │   ├── xrd_pipeline_bmgn.job
-│   │   ├── xrd_pipeline_bmgn_alignnff.job
-│   │   └── xrd_simulate_dataset.job
-│   ├── plotting_scripts/         # Figure generation
-│   │   ├── analyse_filtered_rruff.py
-│   │   ├── analyse_filtered_rruff_runner.sh
-│   │   ├── plot_refinement_mae.py
-│   │   ├── plot_refinement_jsd_18panel.py
-│   │   ├── plot_refinement_mae_bmgn_vs_bmgn_alignnff.py
-│   │   ├── plot_match_rate_crystal_systems.py
-│   │   ├── plot_match_rate.py
-│   │   ├── rruff_stoich_pie.py
-│   │   └── stoich.sh
-│   └── generate_figures.sh       # Top-level figure orchestration script
-├── runs/                         # Output directory (populated after benchmark runs)
-│   ├── no_refinement/
-│   ├── no_refinement_alignnff/
-│   ├── gsas2/
-│   ├── bmgn/
-│   └── bmgn_alignnff/
-├── testing/                      # Unit and integration test assets
-├── key.txt                       # AtomGPT.org API key (user-provided, not tracked)
-└── README.md
+├── manuscript.tex                     # LaTeX source for the paper
+├── scripts/
+│   ├── benchmark/                     # Scripts that call the AGAPI-XRD API and produce raw results
+│   │   ├── rruff_xrd_analysis.py      # Benchmark driver for the RRUFF mineral dataset
+│   │   ├── alex_xrd_analysis.py       # Benchmark driver for the Alexandria PBE-hull dataset
+│   │   ├── xrd_simulate_alex_pbe_hull.py  # Simulate XRD patterns for the Alexandria dataset
+│   │   ├── compile_agapi_replication_metrics.py  # Compile outputs into replication_summary.json
+│   │   ├── compile_results.sh         # Aggregates results from all run directories
+│   │   └── runs_to_compile.txt        # List of run directories to include in compilation
+│   ├── analysis/                      # Scripts that evaluate benchmark outputs
+│   │   ├── analyse_filtered_rruff.py  # Compute lattice-parameter metrics vs. RRUFF ground truth
+│   │   └── analyse_filtered_rruff_runner.sh  # Run analysis across all run directories
+│   └── figures/                       # Scripts that generate manuscript figures
+│       ├── generate_figures.sh        # Orchestrator: run all figure scripts in order
+│       ├── plot_refinement_mae.py     # MAE across six lattice parameters for all refinement settings
+│       ├── plot_refinement_jsd_18panel.py  # 18-panel Jensen-Shannon divergence figure
+│       ├── plot_match_rate_crystal_systems.py  # Crystal-system histograms and match-rate summaries
+│       ├── plot_refinement_mae_bmgn_vs_bmgn_alignnff.py  # BGMN vs. BGMN+ALIGNN-FF MAE comparison
+│       ├── plot_match_rate.py         # Pattern-matching rate summaries
+│       ├── rruff_stoich_pie.py        # Elemental composition pie chart for the RRUFF benchmark set
+│       └── stoich.sh                  # Shell helper for the stoichiometry figure
+├── slurm/                             # HPC job submission scripts (submit from repo root)
+│   ├── rruff_none.job                 # RRUFF benchmark — no refinement
+│   ├── rruff_none_alignnff.job        # RRUFF benchmark — no refinement + ALIGNN-FF
+│   ├── rruff_gsas2.job                # RRUFF benchmark — GSAS-II refinement
+│   ├── rruff_gsas2_alignnff.job       # RRUFF benchmark — GSAS-II refinement + ALIGNN-FF
+│   ├── rruff_bmgn.job                 # RRUFF benchmark — BGMN refinement
+│   ├── rruff_bmgn_alignnff.job        # RRUFF benchmark — BGMN refinement + ALIGNN-FF
+│   ├── alex_none.job                  # Alexandria benchmark — no refinement
+│   ├── alex_none_alignnff.job         # Alexandria benchmark — no refinement + ALIGNN-FF
+│   ├── alex_gsas2.job                 # Alexandria benchmark — GSAS-II refinement
+│   ├── alex_gsas2_alignnff.job        # Alexandria benchmark — GSAS-II refinement + ALIGNN-FF
+│   ├── alex_bmgn.job                  # Alexandria benchmark — BGMN refinement
+│   ├── alex_bmgn_alignnff.job         # Alexandria benchmark — BGMN refinement + ALIGNN-FF
+│   └── simulate_dataset.job           # Simulate XRD patterns for the Alexandria dataset
+├── runs/                              # Output directory (populated after benchmark runs, git-ignored)
+├── testing/                           # Test assets
+└── key.txt                            # AtomGPT.org API key (user-provided, git-ignored)
 ```
 
 ---
@@ -77,24 +81,29 @@ echo "YOUR_ATOMGPT_API_KEY" > key.txt
 
 ## Reproducing the Benchmark
 
-Benchmark runs are submitted as Slurm jobs from `src/slurm_scripts/`. The five pipeline variants correspond to different refinement backends and optional ALIGNN-FF pre-relaxation:
+Benchmark runs are submitted as Slurm jobs from `slurm/`. Two datasets are supported (RRUFF and Alexandria), each with five pipeline variants (refinement backend × ALIGNN-FF pre-relaxation):
 
-| Job file | Refinement backend | ALIGNN-FF pre-relaxation |
-|---|---|---|
-| `xrd_pipeline_none.job` | None | No |
-| `xrd_pipeline_none_alignnff.job` | None | Yes |
-| `xrd_pipeline_gsas2.job` | GSAS-II | No |
-| `xrd_pipeline_bmgn.job` | BGMN | No |
-| `xrd_pipeline_bmgn_alignnff.job` | BGMN | Yes |
+| Job file | Dataset | Refinement backend | ALIGNN-FF |
+|---|---|---|---|
+| `slurm/rruff_none.job` | RRUFF | None | No |
+| `slurm/rruff_none_alignnff.job` | RRUFF | None | Yes |
+| `slurm/rruff_gsas2.job` | RRUFF | GSAS-II | No |
+| `slurm/rruff_gsas2_alignnff.job` | RRUFF | GSAS-II | Yes |
+| `slurm/rruff_bmgn.job` | RRUFF | BGMN | No |
+| `slurm/rruff_bmgn_alignnff.job` | RRUFF | BGMN | Yes |
+| `slurm/alex_none.job` | Alexandria | None | No |
+| `slurm/alex_none_alignnff.job` | Alexandria | None | Yes |
+| `slurm/alex_gsas2.job` | Alexandria | GSAS-II | No |
+| `slurm/alex_gsas2_alignnff.job` | Alexandria | GSAS-II | Yes |
+| `slurm/alex_bmgn.job` | Alexandria | BGMN | No |
+| `slurm/alex_bmgn_alignnff.job` | Alexandria | BGMN | Yes |
 
-Submit any or all jobs from the repository root:
+Submit from the repository root:
 
 ```bash
-sbatch src/slurm_scripts/xrd_pipeline_none.job
-sbatch src/slurm_scripts/xrd_pipeline_none_alignnff.job
-sbatch src/slurm_scripts/xrd_pipeline_gsas2.job
-sbatch src/slurm_scripts/xrd_pipeline_bmgn.job
-sbatch src/slurm_scripts/xrd_pipeline_bmgn_alignnff.job
+sbatch slurm/rruff_none.job
+sbatch slurm/rruff_bmgn.job
+# ... etc.
 ```
 
 Job outputs are written to the corresponding subdirectory under `runs/`.
@@ -103,20 +112,20 @@ Job outputs are written to the corresponding subdirectory under `runs/`.
 
 ## Analysis and Figure Generation
 
-After the Slurm jobs complete, run the following steps in order.
+After the Slurm jobs complete, run the following steps in order from the **repository root**.
 
 ### 1. Analyze benchmark predictions
 
 ```bash
-bash src/plotting_scripts/analyse_filtered_rruff_runner.sh
+bash scripts/analysis/analyse_filtered_rruff_runner.sh
 ```
 
-Processes each `runs/` subdirectory and computes benchmark statistics against the filtered RRUFF ground-truth lattice parameters (`a, b, c ≤ 10 Å`).
+Processes each `runs/` subdirectory and computes lattice-parameter metrics against the filtered RRUFF ground truth (`a, b, c ≤ 10 Å`).
 
 ### 2. Generate manuscript figures
 
 ```bash
-bash src/generate_figures.sh
+bash scripts/figures/generate_figures.sh
 ```
 
 Regenerates all figure assets from the processed run outputs.
@@ -124,7 +133,7 @@ Regenerates all figure assets from the processed run outputs.
 ### 3. Aggregate run-level results
 
 ```bash
-bash src/agapi_xrd_scripts/compile_results.sh
+bash scripts/benchmark/compile_results.sh
 ```
 
 Consolidates outputs from all run directories into a unified summary.
@@ -132,37 +141,10 @@ Consolidates outputs from all run directories into a unified summary.
 ### 4. Compile replication metrics
 
 ```bash
-python src/agapi_xrd_scripts/compile_agapi_replication_metrics.py
+python scripts/benchmark/compile_agapi_replication_metrics.py
 ```
 
 Produces `replication_summary.json`, a structured metrics file suitable for reviewer inspection.
-
----
-
-## Script Reference
-
-### Benchmark and analysis
-
-| Script | Description |
-|---|---|
-| `agapi_xrd_scripts/rruff_xrd_analysis.py` | Primary benchmark driver; queries AGAPI-XRD predictions and writes outputs to `runs/` |
-| `plotting_scripts/analyse_filtered_rruff.py` | Evaluates prediction outputs against filtered RRUFF ground-truth lattice parameters |
-| `plotting_scripts/analyse_filtered_rruff_runner.sh` | Shell wrapper for the filtered RRUFF analysis workflow |
-| `agapi_xrd_scripts/compile_agapi_replication_metrics.py` | Compiles benchmark outputs into `replication_summary.json` |
-| `agapi_xrd_scripts/compile_results.sh` | Aggregates results from multiple run directories |
-| `agapi_xrd_scripts/xrd_simulate_alex_pbe_hull.py` | Standalone dense XRD simulator for dataset generation |
-
-### Figure generation
-
-| Script | Description |
-|---|---|
-| `plotting_scripts/plot_refinement_mae.py` | MAE comparison across six lattice parameters for all refinement settings |
-| `plotting_scripts/plot_refinement_jsd_18panel.py` | 18-panel Jensen–Shannon divergence figure across lattice parameters and refinement settings |
-| `plotting_scripts/plot_match_rate_crystal_systems.py` | Crystal-system histograms and pattern-matching summaries |
-| `plotting_scripts/plot_refinement_mae_bmgn_vs_bmgn_alignnff.py` | Lattice-parameter MAE comparison between BGMN and BGMN + ALIGNN-FF workflows |
-| `plotting_scripts/plot_match_rate.py` | Pattern-matching rate summaries |
-| `plotting_scripts/rruff_stoich_pie.py` | Elemental and stoichiometric composition visualizations for the RRUFF benchmark set |
-| `plotting_scripts/stoich.sh` | Shell helper for the stoichiometry figure workflow |
 
 ---
 

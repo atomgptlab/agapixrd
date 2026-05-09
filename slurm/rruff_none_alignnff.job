@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=alex_none
+#SBATCH --job-name=rruff_none_alignnff
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --ntasks-per-node=1
@@ -8,6 +8,9 @@
 source ~/.bashrc
 eval "$(conda shell.bash hook)"
 conda activate jarvis
+module load cuda/11.8
+nvidia-smi
+
 echo "===== BEGIN BATCH SCRIPT: $0 ==="
 sed -n '1,99999p' "$0"
 echo "===== END BATCH SCRIPT ========="
@@ -32,5 +35,5 @@ if [[ ! -f key.txt ]]; then
 fi
 API_KEY="$(tr -d '\r\n' < key.txt)"
 
-srun --unbuffered mkdir -p runs/alex_no_refinement && cd runs/alex_no_refinement && python ../../src/agapi_xrd_scripts/alex_xrd_analysis.py --api-key "$API_KEY" --output-csv alex_no_refinement_results.csv --output-poscars alex_no_refinement_poscars.json --max-abc 10 --dataset-path ../../xrd_datasets/alex_pbe_hull
+srun --unbuffered mkdir -p runs/rruff_no_refinement_alignnff && cd runs/rruff_no_refinement_alignnff && python ../../scripts/benchmark/rruff_xrd_analysis.py --run-alignn --api-key "$API_KEY" --output-csv rruff_no_refinement_alignnff_results.csv --output-poscars rruff_no_refinement_alignnff_poscars.json --max-abc 10
 echo "===== JOB FINISHED ============="
