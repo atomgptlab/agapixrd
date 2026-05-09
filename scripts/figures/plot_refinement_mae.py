@@ -190,7 +190,7 @@ def style_axes(ax, ax2, labels, title):
     ax.set_xlabel("", fontsize=16)
     ax.set_ylabel("Mean Absolute Error — lengths (Å)", fontsize=16)
     ax2.set_ylabel("Mean Absolute Error — angles (°)", fontsize=16)
-    ax.set_title(title, fontsize=22)
+    ax.set_title(title, fontsize=18)
     ax.set_xticks(np.arange(len(labels)))
     ax.set_xticklabels(labels, rotation=25, ha="right", fontsize=14)
     ax.tick_params(axis="y", labelsize=14)
@@ -199,25 +199,11 @@ def style_axes(ax, ax2, labels, title):
     ax.set_axisbelow(True)
 
 
-def plot_mae_figure(
-    summary: pd.DataFrame,
-    output_path: Path,
-    title: str,
-    figsize=(13, 8),
-):
-    if summary.empty:
-        print(f"WARNING: Empty summary for plot {output_path.name} — skipped", file=sys.stderr)
-        return
-
-    mae_df = summary_to_mae_df(summary)
-
+def _draw_bars(ax, ax2, mae_df):
+    """Draw length bars on ax and angle bars on ax2, set y-limits."""
     labels = list(mae_df.index)
     x = np.arange(len(labels))
     width = 0.12
-
-    fig, ax = plt.subplots(figsize=figsize)
-    ax2 = ax.twinx()
-    ax2.patch.set_alpha(0.0)
 
     display_len = [ax_label_map[p] for p in length_params]
     display_ang = [ax_label_map[p] for p in angle_params]
@@ -231,7 +217,6 @@ def plot_mae_figure(
         display_ang[2]:  2.5 * width,
     }
 
-    # Lengths on left y-axis
     for p, col in zip(length_params, display_len):
         ax.bar(
             x + offsets[col],
@@ -243,7 +228,6 @@ def plot_mae_figure(
             zorder=3,
         )
 
-    # Angles on right y-axis
     for p, col in zip(angle_params, display_ang):
         ax2.bar(
             x + offsets[col],
@@ -265,12 +249,11 @@ def plot_mae_figure(
         if not mae_df[display_ang].isna().all().all()
         else 1.0
     )
-
     ax.set_ylim(0, 1.35 * len_max if len_max > 0 else 1.0)
     ax2.set_ylim(0, 1.35 * ang_max if ang_max > 0 else 1.0)
 
-    style_axes(ax, ax2, labels, title=title)
 
+def _add_legend(ax, ax2):
     h1, l1 = ax.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
     ax.legend(
@@ -284,10 +267,68 @@ def plot_mae_figure(
         frameon=True,
     )
 
+
+def plot_mae_figure(
+    summary: pd.DataFrame,
+    output_path: Path,
+    title: str,
+    figsize=(13, 8),
+):
+    if summary.empty:
+        print(f"WARNING: Empty summary for plot {output_path.name} — skipped", file=sys.stderr)
+        return
+
+    mae_df = summary_to_mae_df(summary)
+    fig, ax = plt.subplots(figsize=figsize)
+    ax2 = ax.twinx()
+    ax2.patch.set_alpha(0.0)
+
+    _draw_bars(ax, ax2, mae_df)
+    style_axes(ax, ax2, list(mae_df.index), title=title)
+    _add_legend(ax, ax2)
+
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"DEBUG: Saved plot -> {output_path}", file=sys.stderr)
+
+
+def plot_mae_two_panels(
+    summary: pd.DataFrame,
+    output_path: Path,
+    suptitle: str = "Mean Absolute Error by Refinement Method",
+    figsize=(13, 16),
+):
+    """Two stacked panels: rruff runs on top, alex runs on bottom."""
+    groups = [
+        (summary[summary["refinement_key"].str.startswith("rruff_")], "RRUFF Dataset"),
+        (summary[summary["refinement_key"].str.startswith("alex_")], "AlEX-PBE Dataset"),
+    ]
+    groups = [(sub, title) for sub, title in groups if not sub.empty]
+
+    if not groups:
+        print("WARNING: No groups found for 2-panel plot.", file=sys.stderr)
+        return
+
+    fig, axes = plt.subplots(len(groups), 1, figsize=figsize)
+    if len(groups) == 1:
+        axes = [axes]
+
+    for i, (sub, title) in enumerate(groups):
+        ax = axes[i]
+        ax2 = ax.twinx()
+        ax2.patch.set_alpha(0.0)
+        mae_df = summary_to_mae_df(sub)
+        _draw_bars(ax, ax2, mae_df)
+        style_axes(ax, ax2, list(mae_df.index), title=title)
+        if i == 0:
+            _add_legend(ax, ax2)
+
+    fig.suptitle(suptitle, fontsize=22, y=1.01)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"DEBUG: Saved 2-panel plot -> {output_path}", file=sys.stderr)
 
 
 # ───────────────────────── main workflow ───────────────────────────
@@ -304,13 +345,20 @@ print(f"DEBUG: Wrote summary -> {summary_path}", file=sys.stderr)
 
 plot_path = RUNS / f"refinement_mae_{dir_list_stem}.png"
 n_methods = len(summary)
-figsize = (max(10, 2.5 * n_methods), 8)
-plot_mae_figure(
-    summary=summary,
-    output_path=plot_path,
-    title="Mean Absolute Error by Refinement Method",
-    figsize=figsize,
-)
+if n_methods > 6:
+    plot_mae_two_panels(
+        summary=summary,
+        output_path=plot_path,
+        figsize=(max(10, 2.5 * (n_methods // 2)), 16),
+    )
+else:
+    figsize = (max(10, 2.5 * n_methods), 8)
+    plot_mae_figure(
+        summary=summary,
+        output_path=plot_path,
+        title="Mean Absolute Error by Refinement Method",
+        figsize=figsize,
+    )
 
 # ───────────────────────── console summary ─────────────────────────
 display_cols = (
