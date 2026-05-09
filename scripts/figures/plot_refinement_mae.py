@@ -199,8 +199,12 @@ def style_axes(ax, ax2, labels, title):
     ax.set_axisbelow(True)
 
 
-def _draw_bars(ax, ax2, mae_df):
-    """Draw length bars on ax and angle bars on ax2, set y-limits."""
+def _draw_bars(ax, ax2, mae_df, len_max=None, ang_max=None):
+    """Draw length bars on ax and angle bars on ax2, set y-limits.
+
+    If len_max/ang_max are provided they are used directly (for shared-scale
+    multi-panel figures); otherwise they are computed from mae_df.
+    """
     labels = list(mae_df.index)
     x = np.arange(len(labels))
     width = 0.12
@@ -239,16 +243,18 @@ def _draw_bars(ax, ax2, mae_df):
             zorder=3,
         )
 
-    len_max = (
-        np.nanmax(mae_df[display_len].values)
-        if not mae_df[display_len].isna().all().all()
-        else 1.0
-    )
-    ang_max = (
-        np.nanmax(mae_df[display_ang].values)
-        if not mae_df[display_ang].isna().all().all()
-        else 1.0
-    )
+    if len_max is None:
+        len_max = (
+            np.nanmax(mae_df[display_len].values)
+            if not mae_df[display_len].isna().all().all()
+            else 1.0
+        )
+    if ang_max is None:
+        ang_max = (
+            np.nanmax(mae_df[display_ang].values)
+            if not mae_df[display_ang].isna().all().all()
+            else 1.0
+        )
     ax.set_ylim(0, 1.35 * len_max if len_max > 0 else 1.0)
     ax2.set_ylim(0, 1.35 * ang_max if ang_max > 0 else 1.0)
 
@@ -299,16 +305,31 @@ def plot_mae_two_panels(
     suptitle: str = "Mean Absolute Error by Refinement Method",
     figsize=(13, 16),
 ):
-    """Two stacked panels: rruff runs on top, alex runs on bottom."""
+    """Two stacked panels: rruff runs on top, alex runs on bottom, shared y-axes."""
     groups = [
         (summary[summary["refinement_key"].str.startswith("rruff_")], "RRUFF Dataset"),
-        (summary[summary["refinement_key"].str.startswith("alex_")], "AlEX-PBE Dataset"),
+        (summary[summary["refinement_key"].str.startswith("alex_")], "alex_pbe_hull Dataset"),
     ]
     groups = [(sub, title) for sub, title in groups if not sub.empty]
 
     if not groups:
         print("WARNING: No groups found for 2-panel plot.", file=sys.stderr)
         return
+
+    # Compute global y-axis limits across all panels
+    display_len = [ax_label_map[p] for p in length_params]
+    display_ang = [ax_label_map[p] for p in angle_params]
+    all_mae_df = summary_to_mae_df(summary)
+    global_len_max = (
+        np.nanmax(all_mae_df[display_len].values)
+        if not all_mae_df[display_len].isna().all().all()
+        else 1.0
+    )
+    global_ang_max = (
+        np.nanmax(all_mae_df[display_ang].values)
+        if not all_mae_df[display_ang].isna().all().all()
+        else 1.0
+    )
 
     fig, axes = plt.subplots(len(groups), 1, figsize=figsize)
     if len(groups) == 1:
@@ -319,7 +340,7 @@ def plot_mae_two_panels(
         ax2 = ax.twinx()
         ax2.patch.set_alpha(0.0)
         mae_df = summary_to_mae_df(sub)
-        _draw_bars(ax, ax2, mae_df)
+        _draw_bars(ax, ax2, mae_df, len_max=global_len_max, ang_max=global_ang_max)
         style_axes(ax, ax2, list(mae_df.index), title=title)
         if i == 0:
             _add_legend(ax, ax2)
