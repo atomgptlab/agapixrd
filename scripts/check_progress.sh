@@ -5,13 +5,24 @@
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 RUNS_DIR="$REPO/runs"
 
-# Average iteration time (seconds) from the last 20 completed entries in a log file.
-# Reads the "[Xs]" timing that appears at the end of each PM/DG/Best result line.
-avg_iter_time() {
+# Raw average iteration time in seconds (float) from the last 20 log entries.
+# Reads the "[Xs]" timing on each PM/DG/Best result line. Prints nothing if unavailable.
+_avg_iter_seconds() {
     local log_file="$1"
-    [[ -z "$log_file" ]] && { echo "N/A"; return; }
+    [[ -z "$log_file" ]] && return
     grep -oP 'Best=.*\[\K[0-9.]+(?=s\])' "$log_file" | tail -20 | \
-        awk 'BEGIN{sum=0;n=0} {sum+=$1;n++} END{if(n>0) printf "%.1fs", sum/n; else print "N/A"}'
+        awk 'BEGIN{sum=0;n=0} {sum+=$1;n++} END{if(n>0) printf "%.2f", sum/n}'
+}
+
+# Human-readable duration from seconds: Xs / X.Xm / X.Xh / X.Xd
+format_duration() {
+    awk "BEGIN {
+        s = $1
+        if      (s < 60)    printf \"%.0fs\",   s
+        else if (s < 3600)  printf \"%.1fm\",   s/60
+        else if (s < 86400) printf \"%.1fh\",   s/3600
+        else                printf \"%.1fd\",   s/86400
+    }"
 }
 
 print_section() {
@@ -20,10 +31,10 @@ print_section() {
     local pipelines=("$@")
 
     printf "\n=== %s (target: %d structures) ===\n" "$label" "$total"
-    printf "%-42s  %8s  %8s  %9s  %6s  %9s  %s\n" \
-        "Pipeline" "Cache" "CSV rows" "Remaining" "Done%" "Avg/iter" "Log file"
-    printf "%-42s  %8s  %8s  %9s  %6s  %9s  %s\n" \
-        "------------------------------------------" "--------" "--------" "---------" "------" "---------" "--------"
+    printf "%-42s  %8s  %8s  %9s  %6s  %9s  %8s  %s\n" \
+        "Pipeline" "Cache" "CSV rows" "Remaining" "Done%" "Avg/iter" "ETA" "Log file"
+    printf "%-42s  %8s  %8s  %9s  %6s  %9s  %8s  %s\n" \
+        "------------------------------------------" "--------" "--------" "---------" "------" "---------" "--------" "--------"
 
     for NAME in "${pipelines[@]}"; do
         DIR="$RUNS_DIR/$NAME"
@@ -39,12 +50,20 @@ print_section() {
 
         JOB_NAME="${log_prefix}${NAME#*_sequential_}"
         LATEST=$(ls -t "$REPO/logs/${JOB_NAME}_"*.out 2>/dev/null | head -1)
-        AVG=$(avg_iter_time "$LATEST")
-        LOG_BASE="${LATEST:+(no log found)}"
+        LOG_BASE="(no log found)"
         [[ -n "$LATEST" ]] && LOG_BASE="$(basename "$LATEST")"
 
-        printf "%-42s  %8d  %8d  %9d  %5s%%  %9s  %s\n" \
-            "$NAME" "$CACHE" "$CSV_ROWS" "$REMAINING" "$PCT" "$AVG" "$LOG_BASE"
+        RAW=$(_avg_iter_seconds "$LATEST")
+        if [[ -n "$RAW" ]]; then
+            AVG="$(awk "BEGIN { printf \"%.1fs\", $RAW }")"
+            ETA="$(format_duration "$(awk "BEGIN { printf \"%.0f\", $RAW * $REMAINING }")")"
+        else
+            AVG="N/A"
+            ETA="N/A"
+        fi
+
+        printf "%-42s  %8d  %8d  %9d  %5s%%  %9s  %8s  %s\n" \
+            "$NAME" "$CACHE" "$CSV_ROWS" "$REMAINING" "$PCT" "$AVG" "$ETA" "$LOG_BASE"
     done
     echo ""
 }
@@ -73,10 +92,10 @@ RRUFF_PIPELINES=(
 )
 
 printf "\n=== RRUFF powder XRD (target: %d structures) ===\n" "$RRUFF_TOTAL"
-printf "%-42s  %8s  %8s  %9s  %6s  %9s  %s\n" \
-    "Pipeline" "Cache" "CSV rows" "Remaining" "Done%" "Avg/iter" "Log file"
-printf "%-42s  %8s  %8s  %9s  %6s  %9s  %s\n" \
-    "------------------------------------------" "--------" "--------" "---------" "------" "---------" "--------"
+printf "%-42s  %8s  %8s  %9s  %6s  %9s  %8s  %s\n" \
+    "Pipeline" "Cache" "CSV rows" "Remaining" "Done%" "Avg/iter" "ETA" "Log file"
+printf "%-42s  %8s  %8s  %9s  %6s  %9s  %8s  %s\n" \
+    "------------------------------------------" "--------" "--------" "---------" "------" "---------" "--------" "--------"
 
 for NAME in "${RRUFF_PIPELINES[@]}"; do
     DIR="$RUNS_DIR/$NAME"
@@ -92,11 +111,19 @@ for NAME in "${RRUFF_PIPELINES[@]}"; do
 
     JOB_NAME="${NAME/rruff_no_refinement/rruff_none}"
     LATEST=$(ls -t "$REPO/logs/${JOB_NAME}_"*.out 2>/dev/null | head -1)
-    AVG=$(avg_iter_time "$LATEST")
-    LOG_BASE="${LATEST:+(no log found)}"
+    LOG_BASE="(no log found)"
     [[ -n "$LATEST" ]] && LOG_BASE="$(basename "$LATEST")"
 
-    printf "%-42s  %8d  %8d  %9d  %5s%%  %9s  %s\n" \
-        "$NAME" "$CACHE" "$CSV_ROWS" "$REMAINING" "$PCT" "$AVG" "$LOG_BASE"
+    RAW=$(_avg_iter_seconds "$LATEST")
+    if [[ -n "$RAW" ]]; then
+        AVG="$(awk "BEGIN { printf \"%.1fs\", $RAW }")"
+        ETA="$(format_duration "$(awk "BEGIN { printf \"%.0f\", $RAW * $REMAINING }")")"
+    else
+        AVG="N/A"
+        ETA="N/A"
+    fi
+
+    printf "%-42s  %8d  %8d  %9d  %5s%%  %9s  %8s  %s\n" \
+        "$NAME" "$CACHE" "$CSV_ROWS" "$REMAINING" "$PCT" "$AVG" "$ETA" "$LOG_BASE"
 done
 echo ""
