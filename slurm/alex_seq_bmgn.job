@@ -1,0 +1,72 @@
+#!/bin/bash
+
+#SBATCH --job-name=alex_seq_bmgn
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --error=logs/%x_%j.err
+#SBATCH --ntasks-per-node=1
+#SBATCH --time=3-00:00:00
+#SBATCH --partition=nvl
+
+source ~/.bashrc
+eval "$(conda shell.bash hook)"
+conda activate jarvis
+
+export PRINT_STRUCTURES=1
+export AtomGPT_COMPILE_DISABLE=1
+export PYTHONUNBUFFERED=1
+export TQDM_MININTERVAL=0.1
+export TQDM_MINITERS=1
+export HF_HOME=/scratch/kchoudh2/$USER/hf_home
+export HUGGINGFACE_HUB_CACHE=/scratch/kchoudh2/$USER/hf_home/hub
+export TRANSFORMERS_CACHE=/scratch/kchoudh2/$USER/hf_home/transformers
+export HF_DATASETS_CACHE=/scratch/kchoudh2/$USER/hf_home/datasets
+export ATOMGPT_PATH=~/repositories/atomgpt_jhu
+
+echo "===== BEGIN BATCH SCRIPT: $0 ==="
+sed -n '1,99999p' "$0"
+echo "===== END BATCH SCRIPT ========="
+echo ""
+echo "===== BEGIN JOB METADATA ======="
+echo "Nodes:              ${SLURM_JOB_NUM_NODES}"
+echo "Tasks (ntasks):     ${SLURM_NTASKS:-1}"
+echo "CPUs per task:      ${SLURM_CPUS_PER_TASK:-1}"
+echo "CPUs per node:      ${SLURM_CPUS_ON_NODE:-unknown}"
+echo "Job CPUs/node map:  ${SLURM_JOB_CPUS_PER_NODE}"
+echo "GPUs (job):         ${SLURM_JOB_GPUS:-${SLURM_GPUS:-0}}"
+echo "GPUs per node:      ${SLURM_GPUS_PER_NODE}"
+echo "GPUs per task:      ${SLURM_GPUS_PER_TASK}"
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}"
+echo "===== END JOB METADATA ========="
+echo ""
+echo "===== START COMPUTATION ========"
+
+PROJECT_ROOT="${SLURM_SUBMIT_DIR:-$(pwd)}"
+PYTHON=/home/ccamp104/scratchkchoudh2/ccamp104/miniconda3/envs/jarvis/bin/python
+SCRIPT="$PROJECT_ROOT/scripts/benchmark/alex_xrd_analysis.py"
+DATASET="$PROJECT_ROOT/xrd_datasets/alex_pbe_hull"
+NAME="alex_sequential_bmgn"
+RUN_DIR="$PROJECT_ROOT/runs/$NAME"
+
+if [[ ! -f "$PROJECT_ROOT/key.txt" ]]; then
+    echo "ERROR: key.txt not found in $PROJECT_ROOT"
+    exit 1
+fi
+API_KEY="$(tr -d '\r\n' < "$PROJECT_ROOT/key.txt")"
+
+mkdir -p "$RUN_DIR"
+echo "Run directory:  $RUN_DIR"
+echo "Cache before:   $(find "$RUN_DIR/.alex_cache" -name '*.json' 2>/dev/null | wc -l)"
+echo ""
+
+"$PYTHON" "$SCRIPT" \
+    --api-key "$API_KEY" \
+    --dataset-path "$DATASET" \
+    --max-abc 10 \
+    --run-refinement --refinement-engine bmgn \
+    --output-csv "$RUN_DIR/${NAME}_results.csv" \
+    --output-poscars "$RUN_DIR/${NAME}_poscars.json"
+
+EXIT_CODE=$?
+echo ""
+echo "Cache after:    $(find "$RUN_DIR/.alex_cache" -name '*.json' 2>/dev/null | wc -l)"
+echo "===== JOB FINISHED (exit $EXIT_CODE) ============="
