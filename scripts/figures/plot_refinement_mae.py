@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 
@@ -13,6 +14,13 @@ import matplotlib.pyplot as plt
 
 
 # ───────────────────────── config / labels ─────────────────────────
+def pretty_run_name(run_key: str) -> str:
+    """Strip pipeline noise from a run directory name for display."""
+    name = run_key.replace("_seq_", "_")
+    name = re.sub(r"_s\d+$", "", name)
+    return name
+
+
 def load_refinement_dirs(path: Path) -> dict[str, str]:
     """Parse a text file of refinement directory names, one per line."""
     dirs = {}
@@ -20,7 +28,7 @@ def load_refinement_dirs(path: Path) -> dict[str, str]:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        dirs[line] = line
+        dirs[line] = pretty_run_name(line)
     if not dirs:
         print(f"ERROR: No entries found in {path}", file=sys.stderr)
         sys.exit(1)
@@ -307,8 +315,8 @@ def plot_mae_two_panels(
 ):
     """Two stacked panels: rruff runs on top, alex runs on bottom, shared y-axes."""
     groups = [
-        (summary[summary["refinement_key"].str.startswith("rruff_")], "RRUFF Dataset"),
-        (summary[summary["refinement_key"].str.startswith("alex_")], "alex_pbe_hull Dataset"),
+        (summary[summary["refinement_key"].str.startswith("rruff_")], r"RRUFF $a,b,c \leq 10$ Å"),
+        (summary[summary["refinement_key"].str.startswith("alex_")], r"Alex PBE Hull $a,b,c \leq 10$ Å"),
     ]
     groups = [(sub, title) for sub, title in groups if not sub.empty]
 
